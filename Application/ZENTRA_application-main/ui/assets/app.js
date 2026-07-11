@@ -210,24 +210,50 @@ const ZENTRA = {
      so say it out loud, once per distinct reason. */
   _reportEngineError(err) {
     var existing = document.getElementById('zt-engine-error');
-    // Engine recovered (or never failed) → remove the banner and reset.
-    if (!err) { if (existing) existing.remove(); ZENTRA._engineErrShown = null; return; }
+    // Engine recovered (or never failed) → remove the banner and reset both flags
+    // (a future error, even the same text, should show again).
+    if (!err) {
+      if (existing) existing.remove();
+      ZENTRA._engineErrShown = null;
+      ZENTRA._engineErrDismissed = null;
+      return;
+    }
+    // User closed the banner for THIS reason → keep it hidden until the reason
+    // changes or clears. A different error text still surfaces.
+    if (ZENTRA._engineErrDismissed === err) return;
     if (ZENTRA._engineErrShown === err && existing) return;
     ZENTRA._engineErrShown = err;
     console.error('[ZENTRA] engine not loaded:', err);
     // A PERSISTENT bar, not a 15s toast: while the AI engine is down the video is a
     // plain passthrough and NOTHING is detected — clean video with no boxes looks
     // exactly like "everyone is compliant", so the warning must stay on screen until
-    // it is actually fixed.
+    // it is actually fixed (or the user explicitly dismisses it).
     var bar = existing || document.createElement('div');
     bar.id = 'zt-engine-error';
     bar.setAttribute('role', 'alert');
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;'
-      + 'background:var(--red,#ef4444);color:#fff;padding:9px 16px;font-size:13px;'
-      + 'font-weight:600;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.35);'
+    // Bottom (not top) so it doesn't cover the topbar; leaves room for the close ✕.
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;'
+      + 'background:var(--red,#ef4444);color:#fff;padding:9px 44px 9px 16px;font-size:13px;'
+      + 'font-weight:600;text-align:center;box-shadow:0 -2px 10px rgba(0,0,0,.35);'
       + 'font-family:var(--font)';
-    bar.textContent = '⚠ ระบบ AI ไม่ทำงาน — ไม่มีการตรวจจับใด ๆ: ' + err;
+    // err is a backend exception string — treat as text, not markup.
+    bar.innerHTML = '<span></span>'
+      + '<button type="button" title="ปิด" onclick="ZENTRA._dismissEngineError()" '
+      + 'style="position:absolute;top:50%;right:12px;transform:translateY(-50%);'
+      + 'width:24px;height:24px;border:none;background:rgba(255,255,255,.18);color:#fff;'
+      + 'border-radius:6px;cursor:pointer;font-size:15px;line-height:1;display:flex;'
+      + 'align-items:center;justify-content:center">×</button>';
+    bar.firstChild.textContent = '⚠ ระบบ AI ไม่ทำงาน — ไม่มีการตรวจจับใด ๆ: ' + err;
     if (!existing) document.body.appendChild(bar);
+  },
+
+  // Close the engine-error banner and remember the dismissed reason so the next
+  // status poll doesn't immediately re-open it.
+  _dismissEngineError() {
+    var bar = document.getElementById('zt-engine-error');
+    if (bar) bar.remove();
+    ZENTRA._engineErrDismissed = ZENTRA._engineErrShown;
+    ZENTRA._engineErrShown = null;
   },
 
   _updateAlertCounters() {
