@@ -19,8 +19,8 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
       </span>
       <div style="text-align:center">
-        <div style="font-size:13.5px;font-weight:700;color:var(--text)">เพิ่มกล้อง</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">เชื่อมต่อแหล่งภาพ</div>
+        <div style="font-size:13.5px;font-weight:700;color:var(--text)">เปลี่ยนแหล่งภาพ</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">เลือกกล้อง / วิดีโอ</div>
       </div>
     </button>
 
@@ -91,7 +91,7 @@
 <!-- ══════════════════════════════════════════════
      FULLSCREEN VIEW MODAL
 ══════════════════════════════════════════════ -->
-<div id="cam-fs-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;flex-direction:column">
+<div id="cam-fs-modal" role="dialog" aria-modal="true" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:200;flex-direction:column">
   <!-- Topbar -->
   <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);flex-shrink:0">
     <div style="display:flex;align-items:center;gap:10px">
@@ -128,7 +128,7 @@
 <!-- ══════════════════════════════════════════════
      ROLE ASSIGNMENT MODAL
 ══════════════════════════════════════════════ -->
-<div id="cam-role-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center">
+<div id="cam-role-modal" role="dialog" aria-modal="true" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;align-items:center;justify-content:center">
   <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.5);width:440px;max-height:90vh;overflow-y:auto;padding:28px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <div>
@@ -290,6 +290,8 @@ function camOpenRoleModal(idx) {
   var modal = document.getElementById('cam-role-modal');
   if (!modal) return;
   modal.style.display = 'flex';
+  // Click the dark backdrop (outside the dialog card) to close.
+  modal.onclick = function(e) { if (e.target === modal) camCloseRoleModal(); };
 
   var nm = document.getElementById('role-modal-cam-name');
   if (nm) nm.textContent = c.name;
@@ -415,7 +417,22 @@ function camSaveRoles() {
 }
 
 // ─── Init ─────────────────────────────────────────
+// ESC closes whichever camera modal is open. Stored on window so re-navigating
+// to this screen (which re-runs this script) replaces the old handler instead of
+// stacking a new one each time.
+function camEscHandler(e) {
+  if (e.key !== 'Escape') return;
+  var role = document.getElementById('cam-role-modal');
+  if (role && role.style.display === 'flex') { camCloseRoleModal(); return; }
+  var fs = document.getElementById('cam-fs-modal');
+  if (fs && fs.style.display === 'flex') { camCloseFs(); }
+}
+
 function init_cameras() {
+  if (window._camEscHandler) document.removeEventListener('keydown', window._camEscHandler);
+  window._camEscHandler = camEscHandler;
+  document.addEventListener('keydown', window._camEscHandler);
+
   _camList = [{ id: 'cam0', name: 'กล้อง #1', source: (ZENTRA.state.pipeline && ZENTRA.state.pipeline.source) || '—' }];
 
   // Load saved roles from settings

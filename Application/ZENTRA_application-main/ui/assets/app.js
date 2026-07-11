@@ -583,6 +583,12 @@ function renderTopbar() {
     + '<span class="topbar-site">ZENTRA &middot; โรงงาน</span>'
     + '</div>'
     + '<div class="topbar-right">'
+    // Lock badge: shown only when the server requires a token (ZENTRA_API_TOKEN),
+    // so the operator can see at a glance that the API is protected.
+    + (ZENTRA_TOKEN
+        ? '<span title="API ป้องกันด้วยโทเคน (ZENTRA_API_TOKEN)" style="display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--green-dim);color:var(--green);font-size:11.5px;font-weight:700">'
+          + '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>ป้องกัน</span>'
+        : '')
     + '<button class="topbar-btn" id="topbar-theme-btn" onclick="ZENTRA.toggleTheme()" title="สลับธีม">'
     + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + themeIco + '</svg>'
     + '</button>'

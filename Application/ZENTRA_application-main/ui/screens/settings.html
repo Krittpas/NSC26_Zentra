@@ -11,8 +11,8 @@
       <div class="settings-menu-item"        data-section="data"    onclick="showSection('data',   this)">การจัดการข้อมูล</div>
       <div class="settings-menu-item"        data-section="about"   onclick="showSection('about',  this)">การจัดการระบบ</div>
       <div class="settings-status-bar">
-        <div class="status-dot ok"></div>
-        ระบบทำงานปกติ
+        <div class="status-dot off" id="set-status-dot"></div>
+        <span id="set-status-txt" style="color:var(--text-muted)">—</span>
       </div>
     </div>
 
@@ -30,9 +30,9 @@
   <div class="settings-section-sub">ตั้งค่า Token และกลุ่มที่รับการแจ้งเตือนแต่ละระดับ</div>
 
   <div class="settings-group">
-    <div class="settings-group-title">LINE Notify Token</div>
+    <div class="settings-group-title">โทเคน LINE (Channel Access Token)</div>
     <div class="input-row">
-      <input class="input" id="line-token" type="password" placeholder="Channel Access Token...">
+      <input class="input" id="line-token" type="password" placeholder="วางโทเคนที่นี่...">
       <button class="btn btn-ghost btn-sm" onclick="toggleToken()">แสดง / แก้ไข</button>
     </div>
     <div class="toggle-wrap mt-2">
@@ -47,11 +47,11 @@
     <div class="settings-group-title">กลุ่มรับการแจ้งเตือน</div>
     <table class="alert-table w-full">
       <thead>
-        <tr><th>ระดับ</th><th>กลุ่มที่ส่ง</th><th>Cooldown</th><th>เปิด</th></tr>
+        <tr><th>ระดับ</th><th>กลุ่มที่ส่ง</th><th>หน่วงเวลา</th><th>เปิด</th></tr>
       </thead>
       <tbody>
         <tr>
-          <td><span class="level-badge warning">⚠ WARNING</span><br><small class="text-muted">ไม่สวม PPE</small></td>
+          <td><span class="level-badge warning">⚠ เตือน</span><br><small class="text-muted">ไม่สวม PPE</small></td>
           <td><input class="input" id="grp-supervisor" type="text" placeholder="Group ID (หัวหน้างาน)" style="font-size:12px;padding:5px 8px"></td>
           <td><input class="cooldown-input" id="cd-warning" type="number" value="30"> s</td>
           <td>
@@ -60,7 +60,7 @@
           </td>
         </tr>
         <tr>
-          <td><span class="level-badge alert">🔴 ALERT</span><br><small class="text-muted">เข้าพื้นที่อันตราย</small></td>
+          <td><span class="level-badge alert">🔴 อันตราย</span><br><small class="text-muted">เข้าพื้นที่อันตราย</small></td>
           <td><input class="input" id="grp-safety" type="text" placeholder="Group ID (Safety Officer)" style="font-size:12px;padding:5px 8px"></td>
           <td><input class="cooldown-input" id="cd-alert" type="number" value="20"> s</td>
           <td>
@@ -69,7 +69,7 @@
           </td>
         </tr>
         <tr>
-          <td><span class="level-badge emergency">🆘 EMERGENCY</span><br><small class="text-muted">ตรวจพบการล้ม</small></td>
+          <td><span class="level-badge emergency">🆘 ฉุกเฉิน</span><br><small class="text-muted">ตรวจพบการล้ม</small></td>
           <td><input class="input" id="grp-emergency" type="text" placeholder="Group ID (Emergency)" style="font-size:12px;padding:5px 8px"></td>
           <td><input class="cooldown-input" id="cd-emergency" type="number" value="15"> s</td>
           <td>
@@ -79,36 +79,6 @@
         </tr>
       </tbody>
     </table>
-  </div>
-
-  <div class="settings-group">
-    <div class="settings-group-title">เกณฑ์การตรวจจับ AI</div>
-    <div class="flex flex-col gap-3">
-      <div>
-        <div class="flex justify-between mb-1">
-          <span class="input-label">PPE Confidence threshold</span>
-          <span class="text-accent font-600" id="val-ppe">0.30</span>
-        </div>
-        <input type="range" min="0.25" max="0.95" step="0.01" value="0.30" id="sl-ppe"
-               oninput="document.getElementById('val-ppe').textContent=parseFloat(this.value).toFixed(2)">
-      </div>
-      <div>
-        <div class="flex justify-between mb-1">
-          <span class="input-label">Fall detection — frame confirmation</span>
-          <span class="text-accent font-600" id="val-frames">6</span> <span class="text-muted text-xs"> frame</span>
-        </div>
-        <input type="range" min="1" max="20" step="1" value="6" id="sl-frames"
-               oninput="document.getElementById('val-frames').textContent=this.value">
-      </div>
-      <div>
-        <div class="flex justify-between mb-1">
-          <span class="input-label">Bbox ratio threshold (แนวนอน)</span>
-          <span class="text-accent font-600" id="val-ratio">0.72</span>
-        </div>
-        <input type="range" min="0.50" max="0.95" step="0.01" value="0.72" id="sl-ratio"
-               oninput="document.getElementById('val-ratio').textContent=parseFloat(this.value).toFixed(2)">
-      </div>
-    </div>
   </div>
 
   <div style="display:flex;gap:8px;margin-top:8px;">
@@ -134,7 +104,7 @@
       </div>
       <div>
         <div class="flex justify-between mb-1">
-          <span class="input-label">PPE Confidence threshold</span>
+          <span class="input-label">ความเชื่อมั่นการตรวจ PPE</span>
           <span class="text-accent font-600" id="val-ppe">0.30</span>
         </div>
         <input type="range" min="0.25" max="0.95" step="0.01" value="0.30" id="sl-ppe"
@@ -142,7 +112,7 @@
       </div>
       <div>
         <div class="flex justify-between mb-1">
-          <span class="input-label">Fall — frame confirmation</span>
+          <span class="input-label">ยืนยันการล้ม (จำนวนเฟรม)</span>
           <span class="text-accent font-600" id="val-frames">6</span>
         </div>
         <input type="range" min="1" max="20" step="1" value="6" id="sl-frames"
@@ -150,7 +120,7 @@
       </div>
       <div>
         <div class="flex justify-between mb-1">
-          <span class="input-label">Bbox ratio threshold</span>
+          <span class="input-label">อัตราส่วนกล่อง (แนวนอน)</span>
           <span class="text-accent font-600" id="val-ratio">0.72</span>
         </div>
         <input type="range" min="0.50" max="0.95" step="0.01" value="0.72" id="sl-ratio"
@@ -171,7 +141,7 @@
       <span class="text-accent font-600" id="cur-source">—</span>
       <button class="btn btn-outline btn-sm" onclick="changeSource()">เปลี่ยนแหล่งภาพ</button>
     </div>
-    <label class="input-label">Webcam Index (USB)</label>
+    <label class="input-label">หมายเลข Webcam (USB)</label>
     <input class="input mb-2" id="cam-idx" type="number" value="0" min="0" max="9" style="width:80px">
     <div class="toggle-wrap mt-2">
       <label class="toggle"><input type="checkbox" id="flip-h" checked>
@@ -357,7 +327,24 @@ function resetSettings() {
   });
 }
 
+// Reflect the REAL system state in the sidebar status pill instead of a hardcoded
+// green "ระบบทำงานปกติ". ZENTRA.state is kept live by the WebSocket + status poll.
+function updateSettingsStatus() {
+  var dot = document.getElementById('set-status-dot');
+  var txt = document.getElementById('set-status-txt');
+  if (!dot || !txt) return;
+  var cam = ZENTRA.state.camera;
+  if (cam === 'connected') {
+    dot.className = 'status-dot ok';  txt.textContent = 'ระบบทำงานปกติ';       txt.style.color = 'var(--green)';
+  } else if (cam === 'reconnecting') {
+    dot.className = 'status-dot off'; txt.textContent = 'กล้องกำลังเชื่อมต่อ'; txt.style.color = 'var(--yellow)';
+  } else {
+    dot.className = 'status-dot off'; txt.textContent = 'ระบบยังไม่เริ่ม';       txt.style.color = 'var(--text-muted)';
+  }
+}
+
 function init_settings() {
+  updateSettingsStatus();
   loadSettings().then(() => showSection('line', document.querySelector('.settings-menu-item[data-section="line"]')));
 }
 
@@ -420,12 +407,6 @@ function showSection(name, el) {
     const src = document.getElementById('cur-source'); if (src) src.textContent = cam.source || 'webcam';
     const idx = document.getElementById('cam-idx');    if (idx) idx.value = cam.webcam_index ?? 0;
     const flip= document.getElementById('flip-h');     if (flip) flip.checked = cam.flip_horizontal ?? true;
-  }
-  if (name === 'about') {
-    fetch('/api/status').then(r => r.json()).then(d => {
-      const el = document.getElementById('inf-status');
-      if (el) el.textContent = (d.running ? 'กำลังทำงาน' : 'พร้อม (standby)') + ' · ' + (d.device || 'cpu');
-    }).catch(() => {});
   }
   if (name === 'data') {
     loadDataStats();
