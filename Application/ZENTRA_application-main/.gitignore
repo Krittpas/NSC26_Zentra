@@ -1,0 +1,44 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+data/settings.json
+data/collected/
+data/logs/
+data/snapshots/
+data/reports/
+data/zentra.db
+*.db
+*.log
+
+# Nested AI backend — never commit runtime data / weights / secrets
+backend/data/
+backend/models/
+backend/.env
+backend/**/__pycache__/
+
+# Local virtualenv (1.7 GB — never commit)
+.venv/
+venv/
+
+# macOS cruft
+.DS_Store
+**/.DS_Store
+
+# Training artifacts + test/demo media (large, regenerable — not source)
+runs/
+demos/
+*.mp4
+backend/archive/
+
+# Model weights never belong in git
+*.pt
+*.onnx
+*.tflite
+!backend/assets/models/*.tflite
+
+# Archived model weights (1.1 GB, moved out of the live tree — see model_archive/MANIFEST.md)
+model_archive/**
+!model_archive/MANIFEST.md
+backend/logs/
+backend/models/person_v1/

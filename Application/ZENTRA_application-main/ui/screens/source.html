@@ -1,0 +1,166 @@
+<div class="source-screen">
+
+  <!-- Top bar with logo -->
+  <div class="source-topbar">
+    <div class="navbar-brand">
+      <span class="brand-mark">Z</span>
+      <div>
+        <span class="brand-text">ZENTRA</span>
+        <span class="brand-sub">Safety AI System</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Centered source-selection card -->
+  <div class="source-body">
+    <div class="source-card">
+      <div class="source-heading">เลือกแหล่งภาพ</div>
+
+      <!-- Option 1: Webcam -->
+      <div class="radio-option selected" data-value="webcam" onclick="selectSource(this)">
+        <div class="radio-dot"></div>
+        <span class="radio-label">Webcam (USB)</span>
+      </div>
+
+      <!-- Option 2: RTSP -->
+      <div class="radio-option" data-value="rtsp" onclick="selectSource(this)">
+        <div class="radio-dot"></div>
+        <span class="radio-label">RTSP Stream</span>
+      </div>
+      <div class="source-sub-input" id="rtsp-input">
+        <input class="input" id="rtsp-url" type="text"
+               placeholder="rtsp://192.168.1.100:554/stream1">
+      </div>
+
+      <!-- Option 3: File -->
+      <div class="radio-option" data-value="file" onclick="selectSource(this)">
+        <div class="radio-dot"></div>
+        <span class="radio-label">ไฟล์คอมพิวเตอร์</span>
+      </div>
+      <div class="source-sub-input" id="file-input">
+        <div class="input-row">
+          <input class="input" id="file-path" type="text" readonly placeholder="เลือกไฟล์วิดีโอ...">
+          <button class="btn btn-ghost btn-sm" onclick="browseFile()">เลือก</button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="source-actions">
+        <div class="source-error" id="source-error"></div>
+        <button class="btn btn-primary btn-lg w-full" onclick="connectSource()" id="connect-btn">
+          เชื่อมต่อ
+        </button>
+        <button class="btn btn-ghost btn-lg w-full" onclick="connectDemo()" id="demo-btn"
+                style="margin-top:10px">
+          ▶ เข้าโหมด Demo (ไม่ต้องต่อกล้อง)
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+var _selectedSource = 'webcam';
+
+function selectSource(el) {
+  document.querySelectorAll('.radio-option').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  _selectedSource = el.dataset.value;
+
+  // Show/hide sub-inputs
+  ['rtsp-input','file-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('visible');
+  });
+  const subMap = { rtsp: 'rtsp-input', file: 'file-input' };
+  if (subMap[_selectedSource]) {
+    document.getElementById(subMap[_selectedSource]).classList.add('visible');
+  }
+  document.getElementById('source-error').textContent = '';
+}
+
+async function browseFile() {
+  try {
+    const path = await window.pywebview.api.open_file_dialog();
+    if (path) document.getElementById('file-path').value = path;
+  } catch (_) {
+    // pywebview not available in browser test mode
+    document.getElementById('file-path').value = 'test_video.mp4';
+  }
+}
+
+async function connectDemo() {
+  const errEl = document.getElementById('source-error');
+  const btn = document.getElementById('demo-btn');
+  errEl.textContent = '';
+  btn.disabled = true; btn.textContent = 'กำลังเข้าโหมด Demo...';
+  try {
+    const res = await fetch('/api/pipeline/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'file', video_file_path: 'data/demo.mp4' }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      ZENTRA.state.pipeline.running = true;
+      ZENTRA.state.pipeline.source  = 'file';
+      ZENTRA.connectWS();
+      ZENTRA.startStatusPoll();
+      ZENTRA.navigate('dashboard');
+      return;
+    }
+    errEl.textContent = data.error || 'เข้าโหมด Demo ไม่ได้';
+  } catch (_) {
+    errEl.textContent = 'ไม่สามารถเชื่อมต่อกับระบบได้';
+  }
+  btn.disabled = false; btn.textContent = '▶ เข้าโหมด Demo (ไม่ต้องต่อกล้อง)';
+}
+
+async function connectSource() {
+  const btn = document.getElementById('connect-btn');
+  const errEl = document.getElementById('source-error');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent  = 'กำลังเชื่อมต่อ...';
+
+  const body = { source: _selectedSource };
+  if (_selectedSource === 'rtsp') {
+    body.rtsp_url = document.getElementById('rtsp-url').value.trim();
+  }
+  if (_selectedSource === 'file') {
+    body.video_file_path = document.getElementById('file-path').value.trim();
+  }
+
+  try {
+    const res  = await fetch('/api/pipeline/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      ZENTRA.state.pipeline.running = true;
+      ZENTRA.state.pipeline.source  = _selectedSource;
+      ZENTRA.connectWS();
+      ZENTRA.startStatusPoll();
+      ZENTRA.navigate('dashboard');
+    } else {
+      errEl.textContent = data.error || 'ไม่พบอุปกรณ์ / ไม่สามารถเชื่อมต่อได้';
+    }
+  } catch (_) {
+    errEl.textContent = 'ไม่สามารถเชื่อมต่อกับระบบได้';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'เชื่อมต่อ';
+}
+
+function init_source() {
+  // Pre-select last used source from settings if available
+  fetch('/api/settings').then(r => r.json()).then(s => {
+    const src = s?.camera?.source || 'webcam';
+    const el  = document.querySelector(`.radio-option[data-value="${src}"]`);
+    if (el) selectSource(el);
+  }).catch(() => {});
+}
+</script>

@@ -1,0 +1,33 @@
+# requirements.txt — ZENTRA System Dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core ─────────────────────────────────────────────────────
+opencv-python>=4.9.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# ── Roboflow Inference ───────────────────────────────────────
+inference-sdk>=0.9.0      # HTTP client → local Docker inference server (port 9001)
+# inference>=0.18.0       # Optional: run the server via pip instead of Docker
+
+# ── AI / ML ──────────────────────────────────────────────────
+ultralytics>=8.1.0        # YOLOv8 training + inference
+mediapipe==0.10.14        # Pose estimation (33 kpts) — pinned: ships mp.solutions
+protobuf>=4.25.3,<5       # REQUIRED by mediapipe 0.10.14 (protobuf 5+/7 breaks it)
+
+# ── Training ─────────────────────────────────────────────────
+roboflow>=1.1.0           # Dataset download + upload
+torch>=2.1.0              # PyTorch (backend สำหรับ Ultralytics)
+torchvision>=0.16.0
+
+# ── Optional: TensorRT Export ────────────────────────────────
+# onnxruntime>=1.17.0
+# onnx>=1.15.0
+
+# ── Optional: MQTT (IoT Sensor) ──────────────────────────────
+# paho-mqtt>=1.6.1
+
+# TFLite runtime for the fall-detection Transformer (backend/assets/models/*.tflite)
+ai-edge-litert>=2.1.0

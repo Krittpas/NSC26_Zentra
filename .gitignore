@@ -1,0 +1,25 @@
+# ── Redundant archive (duplicate of Application/ZENTRA_application-main/) ──
+*.zip
+
+# ── Stray model weights at repo root (auto-downloads; keep out of git) ──
+# The app's own weights are already ignored by Application/.../.gitignore.
+/yolo11s.pt
+*.pt
+*.onnx
+
+# ── Secrets / runtime / environments (never commit) ──
+.env
+**/.env
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
+*.db
+
+# ── OS cruft ──
+.DS_Store
+**/.DS_Store
+Thumbs.db

@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+# utils/ppe_engine.py — one class that wraps the whole verified engine
+# (ByteTrack detect_track + PPE association + temporal confirm + zone) behind a
+# single `process(frame) -> (annotated_frame, events)` call, so the app pipeline
+# (and the offline harness) share ONE implementation.
+# ================================================================
+from __future__ import annotations
+
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+import config as cfg
+from utils.detect_track import Detector, PersonDetector
+from utils.ppe_association import associate, violations_of, CATEGORIES
+from utils.temporal import TrackWindowConfirmer, CooldownGate
+from utils import zone_geometry
+
+GREEN, RED, CYAN = (0, 210, 0), (0, 0, 220), (255, 190, 0)
+
+# Thai labels for confirmed missing-PPE categories (for alert messages)
+_CAT_TH = {"helmet": "ไม่สวมหมวก", "vest": "ไม่สวมเสื้อกั๊ก", "gloves": "ไม่สวมถุงมือ",
+           "glasses": "ไม่สวมแว่นตา", "boots": "ไม่สวมรองเท้าเซฟตี้"}
+# Short Thai labels for on-frame box overlays
+_CAT_SHORT_TH = {"helmet": "หมวก", "vest": "เสื้อกั๊ก", "gloves": "ถุงมือ",
+                 "glasses": "แว่นตา", "boots": "รองเท้า"}
+
+# Thai-capable font for on-frame overlays (cv2.putText can't render Thai → "???").
+_FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Sarabun-SemiBold.ttf"
+_FONT_CACHE: dict[int, "ImageFont.FreeTypeFont"] = {}
+
+
+def _font(size: int):
+    f = _FONT_CACHE.get(size)
+    if f is None:
+        try:
+            f = ImageFont.truetype(str(_FONT_PATH), size)
+        except Exception:
+            f = ImageFont.load_default()
+        _FONT_CACHE[size] = f
+    return f
+
+
+class PPEEngine:
+    @staticmethod
+    def _resolve_required(ppe_items) -> set:
+        """Which PPE categories THIS camera enforces (absence = violation). None →
+        fall back to the global cfg.PPE_REQUIRED default (helmet, vest)."""
+        if ppe_items is None:
+            ppe_items = getattr(cfg, "PPE_REQUIRED", ["helmet", "vest"])
+        return set(ppe_items) & set(CATEGORIES)
+
+    def __init__(self, zones_path: str | None = None, device: str | None = None,
+                 camera_id: str | None = None, roles: set | None = None,
+                 ppe_items=None):
+        # Two detectors, one job each: a COCO model finds + TRACKS people (high
+        # recall, stable ids, works in crowds); the PPE fine-tune only classifies
+        # items. They are merged back into one dets list before associate().
+        self.person_detector = PersonDetector(device=device)
+        self.person_detector.reset()
+        self.ppe_detector = Detector(device=device)
+        # Back-compat alias: pipeline logs + /api/status read engine.detector.*
+        self.detector = self.ppe_detector
+        self.pconf = TrackWindowConfirmer(cfg.PPE_CONFIRM_FRAMES, cfg.PPE_CONFIRM_WINDOW)
+        self.pcool = CooldownGate(cfg.VIOLATION_COOLDOWN_SECONDS)
+        self.zconf = TrackWindowConfirmer(cfg.ZONE_CONFIRM_FRAMES, cfg.ZONE_CONFIRM_WINDOW)
+        self.zcool = CooldownGate(cfg.ZONE_COOLDOWN_SECONDS)
+        self._zones_path = zones_path
+        self._camera_id = camera_id            # only load zones for this camera (None = all)
+        self.zones = zone_geometry.load_zones(zones_path, camera_id)
+        # Per-camera detection roles gate what runs/draws. roles=None → all on
+        # (back-compat for the offline harness).
+        self.ppe_enabled  = (roles is None) or ("ppe" in roles)
+        self.zone_enabled = (roles is None) or ("zone" in roles)
+        # Fall is opt-IN even when roles is None: it loads a pose model + a TFLite
+        # interpreter, which the PPE-only offline tools have no reason to pay for.
+        self.fall_enabled = bool(roles) and ("fall" in roles)
+        self.fconf = TrackWindowConfirmer(cfg.FALL_CONFIRM_FRAMES, cfg.FALL_CONFIRM_WINDOW)
+        self.fcool = CooldownGate(cfg.FALL_COOLDOWN_SECONDS)
+        self._fallen: set = set()      # confirmed-fallen track ids, for _draw
+        self._fall_incidents: list = []   # (t, cx, cy) — spatial alert de-duplication
+        self._fall = None
+        self._build_fall()
+        # Per-camera set of PPE categories to enforce (absence = violation).
+        # Selectable in the app's per-camera roles modal; None → cfg.PPE_REQUIRED.
+        self._required = self._resolve_required(ppe_items)
+
+    def reload_zones(self):
+        self.zones = zone_geometry.load_zones(self._zones_path, self._camera_id)
+
+    def _build_fall(self):
+        """Load the pose + fall models only for cameras that actually want fall.
+        A failure must never take the pipeline down — the module just reports
+        'standby' and PPE/zone keep running."""
+        if not self.fall_enabled:
+            self._fall = None
+            return
+        if self._fall is not None:
+            return
+        try:
+            from utils.fall_detector import FallDetector
+            self._fall = FallDetector()
+            print(f"[PPEEngine] 🚑 fall detector ready "
+                  f"(backend={self._fall.extractor.name}, mode={self._fall.mode})")
+        except Exception as e:
+            self._fall = None
+            print(f"[PPEEngine] ⚠️ fall detector unavailable → {e}")
+
+    @property
+    def fall_ready(self) -> bool:
+        return self.fall_enabled and self._fall is not None
+
+    def apply_roles(self, roles: set | None):
+        """Update which modules run/draw without reloading the model."""
+        self.ppe_enabled  = (roles is None) or ("ppe" in roles)
+        self.zone_enabled = (roles is None) or ("zone" in roles)
+        was = self.fall_enabled
+        self.fall_enabled = bool(roles) and ("fall" in roles)
+        if self.fall_enabled and not was:
+            self._build_fall()
+        elif was and not self.fall_enabled:
+            self.close_fall()
+
+    def apply_ppe_items(self, ppe_items):
+        """Update which PPE categories this camera enforces (no model reload)."""
+        self._required = self._resolve_required(ppe_items)
+
+    def refresh_tunables(self):
+        """Re-read cfg-based gates (confirm windows + cooldowns) in place, so a
+        Settings save takes effect without a costly YOLO reload. (Confidence is
+        read per-call from cfg inside detect_track, so it needs nothing here.)"""
+        self.pconf = TrackWindowConfirmer(cfg.PPE_CONFIRM_FRAMES, cfg.PPE_CONFIRM_WINDOW)
+        self.pcool = CooldownGate(cfg.VIOLATION_COOLDOWN_SECONDS)
+        self.zconf = TrackWindowConfirmer(cfg.ZONE_CONFIRM_FRAMES, cfg.ZONE_CONFIRM_WINDOW)
+        self.zcool = CooldownGate(cfg.ZONE_COOLDOWN_SECONDS)
+        self.fconf = TrackWindowConfirmer(cfg.FALL_CONFIRM_FRAMES, cfg.FALL_CONFIRM_WINDOW)
+        self.fcool = CooldownGate(cfg.FALL_COOLDOWN_SECONDS)
+        if self._fall is not None:      # Settings sliders were dead until now
+            self._fall.mode = cfg.FALL_MODE
+            self._fall.threshold = float(cfg.FALL_PROB_THRESHOLD)
+        # NOTE: _required is per-camera (set via ppe_items / apply_ppe_items), so it
+        # is intentionally NOT reset here — refresh only re-reads cfg confirm/cooldown.
+
+    def _cat_hit(self, rec, cat) -> bool:
+        """Is `cat` a violation for this person THIS frame?
+        Only categories this camera is set to check (self._required) can fire, and
+        for those, ABSENCE counts (state != WORN) — we don't wait for an unreliable
+        no_* box. Unchecked categories never fire."""
+        if cat not in self._required:
+            return False
+        return rec["states"][cat] != "WORN"
+
+    def _confirmed_missing(self, tid, rec) -> list[str]:
+        """Categories currently hit AND temporally confirmed for this person —
+        the single source of truth shared by detect() (alarms) and _draw()
+        (labels) so the box colour never disagrees with the alert."""
+        if tid is None:
+            return []
+        return [c for c in CATEGORIES
+                if self._cat_hit(rec, c) and self.pconf.is_confirmed((tid, c))]
+
+    def close_fall(self):
+        """Release the pose backend (mediapipe leaks native graphs otherwise)."""
+        if self._fall is not None:
+            try:
+                self._fall.close()
+            except Exception:
+                pass
+        self._fall = None
+        self._fallen.clear()
+        self._fall_incidents.clear()
+
+    def fall_step(self, frame, recs, now=None):
+        """Runs from the pipeline's FIXED-CADENCE fall loop, not from detect():
+        the classifier wants 30 evenly-spaced frames, and the detect loop skips
+        frames. Every tracked person is evaluated — several people can fall in the
+        same emergency, so each track gets its own confirm window and cooldown and
+        emits its own event."""
+        if not self.fall_ready or not recs:
+            return []
+        persons = [r["person"] for r in recs if r["person"].get("track_id") is not None]
+        if not persons:
+            return []
+        try:
+            results = self._fall.step(frame, persons, now=now)
+        except Exception as e:
+            print(f"[PPEEngine] fall_step: {e}")
+            return []
+
+        import time as _t
+        h, w = frame.shape[:2]
+        diag = (w * w + h * h) ** 0.5
+        radius = float(getattr(cfg, "FALL_DEDUPE_RADIUS", 0.15)) * diag
+        window = float(getattr(cfg, "FALL_DEDUPE_SEC", 20.0))
+        tnow = _t.time()
+        self._fall_incidents = [(t, x, y) for (t, x, y) in getattr(self, "_fall_incidents", [])
+                                if tnow - t <= window]
+
+        events, live = [], set()
+        for tid, res in results.items():
+            k = (tid,)
+            live.add(k)
+            confirmed = self.fconf.update(k, res.fallen)
+            # Drive the RED box off the CONFIRMED state, not the instantaneous flag,
+            # so a person on the floor doesn't flicker back to normal for a frame.
+            if confirmed:
+                self._fallen.add(tid)
+            else:
+                self._fallen.discard(tid)
+            if not (confirmed and res.fallen and self.fcool.ready(k)):
+                continue
+            # De-duplicate by PLACE, not by track id. ByteTrack churns ids on some
+            # cameras, and a per-id cooldown then lets each new id re-alarm for the
+            # same person on the same patch of floor.
+            p = next((r["person"] for r in recs if r["person"]["track_id"] == tid), None)
+            if p is None:                      # track vanished between step() and here
+                continue
+            cx, cy = (p["x1"] + p["x2"]) / 2.0, (p["y1"] + p["y2"]) / 2.0
+            if any(((cx - x) ** 2 + (cy - y) ** 2) ** 0.5 < radius
+                   for (_, x, y) in self._fall_incidents):
+                continue
+            self._fall_incidents.append((tnow, cx, cy))
+            events.append({"type": "fall", "track_id": tid, "key": k,
+                           "level": cfg.ALERT_LEVEL_EMERGENCY,
+                           "msg": f"⚠️ ตรวจพบการล้ม (คนที่ #{tid})"})
+        self.fconf.gc(live)
+        self._fallen &= {t for (t,) in live}
+        return events
+
+    def reset(self):
+        self.person_detector.reset()
+        self.ppe_detector.reset()
+
+    def detect(self, frame):
+        """Heavy step: track + associate + temporal confirm. Returns (recs, events).
+        Call this from ONE worker thread (the tracker is stateful/persist=True)."""
+        h, w = frame.shape[:2]
+        # People (+ track ids) from the COCO detector; PPE items from the fine-tune.
+        # Skip the PPE pass entirely when the role is off — saves a full forward.
+        persons = self.person_detector.track(frame)
+        items = self.ppe_detector.detect_items(frame) if self.ppe_enabled else []
+        recs = associate(persons + items)
+        events = []
+        live_p, live_z = set(), set()
+
+        for rec in recs:
+            person = rec["person"]
+            tid = person["track_id"]
+            if tid is None:
+                continue
+            # Exclusion zones (operator booth) mask a person out of ALL detection —
+            # a privacy/masking primitive, applied even when the Zone ROLE is off so
+            # a PPE-only camera still won't alarm people standing inside the booth.
+            if zone_geometry.in_any_exclusion(person, self.zones, w, h):
+                continue
+            if self.ppe_enabled:
+                for cat in CATEGORIES:
+                    k = (tid, cat); live_p.add(k)
+                    hit = self._cat_hit(rec, cat)     # required: absence counts
+                    confirmed = self.pconf.update(k, hit)
+                    if confirmed and hit and self.pcool.ready(k):
+                        events.append({"type": "ppe", "track_id": tid, "key": k,
+                                       "level": cfg.ALERT_LEVEL_WARNING,
+                                       "msg": f"คนที่ #{tid}: {_CAT_TH.get(cat, 'ไม่สวม '+cat)}"})
+            if self.zone_enabled:
+                # Record inside/outside for EVERY danger zone every frame (like PPE)
+                # so the 3-of-5 window is real. Previously only inside-frames were
+                # pushed and gc() reset the key the moment the person stepped out, so
+                # a worker straddling the zone edge (foot-point jitter) could never
+                # reach 3-of-5 and evade the intrusion alarm.
+                hit_ids = {z.id for z in zone_geometry.danger_hits(person, self.zones, w, h)}
+                for z in self.zones:
+                    if z.type != "danger":
+                        continue
+                    zk = (tid, z.id); live_z.add(zk)
+                    inside = z.id in hit_ids
+                    if self.zconf.update(zk, inside) and inside and self.zcool.ready(zk):
+                        events.append({"type": "zone", "track_id": tid, "key": zk,
+                                       "level": cfg.ALERT_LEVEL_ALERT,
+                                       "msg": f"บุกรุกพื้นที่อันตราย '{z.name}' (คนที่ #{tid})"})
+        self.pconf.gc(live_p); self.zconf.gc(live_z)
+        return recs, events
+
+    def draw_on(self, frame, recs):
+        """Light step: draw the latest recs onto ANY frame (fast — no inference).
+        Lets the display run at camera FPS while detection runs slower."""
+        h, w = frame.shape[:2]
+        return self._draw(frame, recs or [], w, h)
+
+    def process(self, frame):
+        """Convenience (offline harness): detect + draw in one call."""
+        recs, events = self.detect(frame)
+        return self.draw_on(frame, recs), events
+
+    def _draw(self, frame, recs, w, h):
+        # Draw shapes with cv2 (fast); collect text to render once with PIL so
+        # Thai labels show correctly (cv2.putText → "???"). Colors below are BGR.
+        texts = []   # (x, y_top, text, rgb)
+        if self.zone_enabled:
+            for z in self.zones:
+                poly = z.polygon_px(w, h)
+                col = RED if z.type == "danger" else (140, 140, 140)
+                cv2.polylines(frame, [poly], True, col, 2)
+                x0, y0 = int(poly[0][0]), int(poly[0][1])
+                texts.append((x0, max(2, y0 - 22), z.name, (col[2], col[1], col[0])))
+        # Person boxes are relevant to both PPE and Zone; skip entirely only when
+        # neither role is on. PPE status/colour is shown only when PPE is enabled.
+        if self.ppe_enabled or self.zone_enabled or self.fall_enabled:
+            for rec in recs:
+                p = rec["person"]; tid = p["track_id"]
+                x1, y1, x2, y2 = int(p["x1"]), int(p["y1"]), int(p["x2"]), int(p["y2"])
+                # A confirmed fall outranks every PPE status — it's the emergency.
+                if tid in self._fallen:
+                    color = RED
+                    label = f"#{tid} ล้ม!"
+                # Show a PPE status only when PPE is on AND this camera actually
+                # checks at least one item — otherwise a neutral box, never a
+                # premature "ปลอดภัย" (which would falsely read as "PPE compliant"
+                # when nothing is being checked).
+                elif self.ppe_enabled and self._required:
+                    # Same hit+confirm rule as detect() → box never disagrees with
+                    # the alert. Three honest states:
+                    #   RED   = a required item is confirmed missing
+                    #   GREEN = every required item is positively worn (verified safe)
+                    #   CYAN  = still verifying (a required item not yet seen worn,
+                    #           but not confirmed-missing) — never a premature "safe"
+                    cviol = self._confirmed_missing(tid, rec)
+                    required_ok = all(rec["states"][c] == "WORN" for c in self._required)
+                    if cviol:
+                        color = RED
+                        label = f"#{tid} ขาด: " + ",".join(_CAT_SHORT_TH.get(c, c) for c in cviol)
+                    elif required_ok:
+                        color = GREEN
+                        label = f"#{tid} ปลอดภัย"
+                    else:
+                        color = CYAN
+                        label = f"#{tid} กำลังตรวจสอบ"
+                else:
+                    color = CYAN
+                    label = f"#{tid}"
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                texts.append((x1, max(2, y1 - 22), label, (color[2], color[1], color[0])))
+                cv2.circle(frame, (int(p['foot'][0]), int(p['foot'][1])), 4, color, -1)
+        return self._draw_texts(frame, texts)
+
+    def _draw_texts(self, frame, items, size: int = 18):
+        """Render all overlay text in a single BGR→PIL→BGR pass (Thai-capable),
+        each with a dark pill background + outline for legibility on video."""
+        if not items:
+            return frame
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        d = ImageDraw.Draw(img, "RGBA")
+        font = _font(size)
+        for (x, y, text, rgb) in items:
+            if not text:
+                continue
+            box = d.textbbox((x, y), text, font=font)
+            d.rectangle([box[0] - 4, box[1] - 2, box[2] + 4, box[3] + 2], fill=(0, 0, 0, 150))
+            d.text((x, y), text, font=font, fill=rgb, stroke_width=1, stroke_fill=(0, 0, 0, 255))
+        return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)

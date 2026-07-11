@@ -1,0 +1,822 @@
+<!-- Zone / Rule Editor — drag-and-drop rule builder + zone drawing toggle -->
+<div style="height:100%;display:flex;flex-direction:column;background:var(--bg);overflow:hidden">
+
+  <!-- ── Toolbar ── -->
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 20px;background:var(--bg-card);border-bottom:1px solid var(--border);flex-shrink:0;z-index:10">
+    <div>
+      <div style="font-size:17px;font-weight:800;color:var(--text);letter-spacing:-.2px">แก้ไขพื้นที่</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:1px">วาดพื้นที่อันตรายบนภาพจากกล้อง</div>
+    </div>
+    <div style="flex:1"></div>
+    <!-- Rule Builder is hidden (future feature); the editor operates in Zone Drawing only. -->
+    <div id="mode-toggle" style="display:none">
+      <button id="mode-rule-btn" onclick="zeSetMode('rule')" style="display:none">Rule Builder</button>
+      <button id="mode-zone-btn" onclick="zeSetMode('zone')" style="display:none">Zone Drawing</button>
+    </div>
+  </div>
+
+  <!-- ── Main content ── -->
+  <div style="flex:1;display:flex;overflow:hidden;position:relative">
+
+    <!-- ======= RULE BUILDER PANEL (HIDDEN — FUTURE FEATURE) =======
+         Currently hidden: the editor defaults to Zone Drawing (see init_zone_editor).
+         The node-graph builder below is UI-only and NOT wired to detection.
+         FUTURE IMPLEMENTATION PLAN:
+           1. Backend: add GET/POST /api/zone/rules persisting to data/zone_rules.json
+              (mirror _load_zones/_save_zones in server/api.py).
+           2. Rules schema: [{id, name, trigger:{type:'ppe'|'zone'|'fall', params},
+              logic:'AND'|'OR', actions:[{type:'line'|'log'|'siren', target}]}].
+           3. Engine: PPEEngine.detect() evaluates rules per confirmed detection to
+              drive custom alert routing (which LINE group, severity, etc.).
+           4. Re-enable the mode toggle above + zeSave() (POST /api/zone/rules) and
+              make zeSave show 'Saved' only on HTTP 2xx.
+    -->
+    <div id="rule-panel" style="display:flex;flex:1;overflow:hidden">
+
+      <!-- Left palette -->
+      <div style="width:240px;flex-shrink:0;background:var(--bg-card);border-right:1px solid var(--border);overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:18px">
+
+        <!-- Saved Rules list -->
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px">Saved Rules</div>
+          <div id="ze-rules-list" style="display:flex;flex-direction:column;gap:6px"></div>
+          <button onclick="zeNewRule()" style="margin-top:10px;width:100%;height:32px;border:1.5px dashed var(--border-mid);border-radius:8px;background:transparent;color:var(--text-muted);font-family:var(--font);font-size:12.5px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>
+            New Rule
+          </button>
+        </div>
+
+        <div style="height:1px;background:var(--border)"></div>
+
+        <!-- Vision blocks palette -->
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px">Vision Blocks</div>
+          <div style="display:flex;flex-direction:column;gap:6px" id="block-palette"></div>
+        </div>
+
+        <div style="height:1px;background:var(--border)"></div>
+
+        <!-- Logic blocks -->
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px">Logic</div>
+          <div style="display:flex;flex-direction:column;gap:6px" id="logic-palette"></div>
+        </div>
+
+        <div style="height:1px;background:var(--border)"></div>
+
+        <!-- Action blocks -->
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.7px;text-transform:uppercase;margin-bottom:10px">Actions</div>
+          <div style="display:flex;flex-direction:column;gap:6px" id="action-palette"></div>
+        </div>
+
+      </div>
+
+      <!-- Node Canvas -->
+      <div id="ze-canvas-wrap" style="flex:1;position:relative;overflow:hidden;background:radial-gradient(circle,var(--border) 1px,transparent 1px) 0 0 / 28px 28px">
+
+        <!-- Drop zone hint -->
+        <div id="ze-canvas-hint" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;z-index:1">
+          <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="var(--border-mid)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="10" x="5" y="7" rx="2"/><path d="M12 7V5M12 17v2M5 12H3M21 12h-2M7.05 7.05 5.64 5.64M18.36 18.36l-1.41-1.41M16.95 7.05l1.41-1.41M5.64 18.36l1.41-1.41"/></svg>
+          <div style="font-size:14px;font-weight:600;color:var(--text-muted);margin-top:14px">Drag blocks here to build rules</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:6px">Connect nodes with mouse to create safety logic</div>
+        </div>
+
+        <!-- SVG for connections -->
+        <svg id="ze-svg" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:2"></svg>
+
+        <!-- Nodes container -->
+        <div id="ze-nodes" style="position:absolute;inset:0;z-index:3"></div>
+
+        <!-- Drop overlay (active during drag) -->
+        <div id="ze-drop-overlay" style="position:absolute;inset:0;z-index:4;display:none;border:2.5px dashed var(--accent);border-radius:12px;background:var(--accent-dim);pointer-events:none;opacity:.7"></div>
+
+      </div>
+
+      <!-- Right properties panel -->
+      <div id="ze-props-panel" style="width:220px;flex-shrink:0;background:var(--bg-card);border-left:1px solid var(--border);padding:18px 14px;overflow-y:auto">
+        <div style="font-size:12px;font-weight:800;color:var(--text-muted);letter-spacing:.7px;text-transform:uppercase;margin-bottom:12px">Properties</div>
+        <div id="ze-props-content" style="font-size:13px;color:var(--text-muted)">Select a node to configure it</div>
+      </div>
+
+    </div>
+
+    <!-- ======= ZONE DRAWING PANEL ======= -->
+    <div id="zone-panel" style="display:none;flex:1;position:relative;overflow:hidden">
+      <canvas id="zone-canvas" style="display:block;width:100%;height:100%;cursor:crosshair"></canvas>
+      <video id="zone-video" style="display:none"></video>
+      <img id="zone-bg" src="" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;opacity:.6" alt="">
+
+      <!-- Top-left: camera + zone type -->
+      <div style="position:absolute;top:14px;left:14px;z-index:10;display:flex;flex-direction:column;gap:10px">
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;box-shadow:var(--shadow)">
+          <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">กล้อง</div>
+          <select id="zone-cam-select" onchange="zoneOnCamChange()" style="width:170px;height:32px;border:1px solid var(--border);border-radius:7px;background:var(--bg-card-alt);color:var(--text);font-family:var(--font);font-size:13px;padding:0 8px;cursor:pointer"></select>
+        </div>
+      </div>
+
+      <!-- Top-right: saved zones list -->
+      <div style="position:absolute;top:14px;right:14px;z-index:10;width:230px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px;box-shadow:var(--shadow);max-height:calc(100% - 90px);overflow-y:auto">
+        <div style="font-size:11px;font-weight:800;color:var(--text-muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px">พื้นที่อันตรายบนกล้องนี้</div>
+        <div id="zone-saved-list" style="display:flex;flex-direction:column;gap:7px"></div>
+      </div>
+
+      <!-- Help hint -->
+      <div style="position:absolute;bottom:64px;left:50%;transform:translateX(-50%);z-index:10;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);border:1px solid var(--border);border-radius:99px;padding:6px 16px;font-size:11.5px;color:rgba(255,255,255,.8);white-space:nowrap">
+        🖱️ คลิกวางจุด · ลากมุมเพื่อปรับ · คลิกพื้นที่ในรายการเพื่อแก้ไข
+      </div>
+      <div style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:10">
+        <button onclick="zoneUndo()" style="height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-family:var(--font);font-size:13px;cursor:pointer">↶ ย้อน</button>
+        <button onclick="zoneClear()" style="height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-family:var(--font);font-size:13px;cursor:pointer">ล้าง</button>
+        <button id="zone-save-btn" onclick="zoneSave()" style="height:34px;padding:0 16px;border-radius:8px;border:none;background:var(--green);color:#fff;font-family:var(--font);font-size:13px;font-weight:600;cursor:pointer">💾 บันทึกโซน</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────
+var _zeNodes    = [];   // { id, type, x, y, label, color, icon, props }
+var _zeEdges    = [];   // { from, to }
+var _zeNextId   = 1;
+var _zeSelId    = null;
+var _zeDrag     = null; // { nodeId, offX, offY }
+var _zeMode     = 'rule';
+var _zeConnFrom = null; // port id for connection drawing
+
+// ─── Block definitions ────────────────────────────
+var _visionBlocks = [
+  { type:'ppe',      label:'PPE Detection',    color:'var(--orange)', bg:'rgba(255,122,69,.13)', icon:'🦺' },
+  { type:'zone',     label:'Zone Intrusion',   color:'var(--accent)', bg:'var(--accent-dim)',    icon:'📍' },
+  { type:'fall',     label:'Fall Detected',    color:'var(--red)',    bg:'var(--red-dim)',        icon:'🚨' },
+  { type:'heat',     label:'Heat / Fatigue',   color:'#F59E0B',       bg:'rgba(245,158,11,.13)', icon:'🌡️' },
+];
+var _logicBlocks = [
+  { type:'and',  label:'AND Gate', color:'var(--green)',  bg:'var(--green-dim)',      icon:'⊕' },
+  { type:'or',   label:'OR Gate',  color:'var(--yellow)', bg:'rgba(245,158,11,.12)', icon:'⊗' },
+  { type:'not',  label:'NOT Gate', color:'var(--text-muted)', bg:'var(--bg-card-alt)', icon:'¬' },
+  { type:'delay',label:'Delay',    color:'var(--accent)', bg:'var(--accent-dim)',     icon:'⏱' },
+];
+var _actionBlocks = [
+  { type:'alert',    label:'Send Alert',    color:'var(--orange)', bg:'rgba(255,122,69,.12)', icon:'🔔' },
+  { type:'line',     label:'LINE Notify',   color:'#06C755',       bg:'rgba(6,199,85,.12)',   icon:'💬' },
+  { type:'siren',    label:'Siren / Buzzer',color:'var(--red)',    bg:'var(--red-dim)',        icon:'🚨' },
+  { type:'record',   label:'Record Clip',   color:'var(--accent)', bg:'var(--accent-dim)',     icon:'⏺' },
+  { type:'shutdown', label:'Emergency Stop', color:'var(--red)',   bg:'var(--red-dim)',        icon:'⛔' },
+];
+var _allBlocks = _visionBlocks.concat(_logicBlocks).concat(_actionBlocks);
+
+function zeBlockDef(type) {
+  for (var i = 0; i < _allBlocks.length; i++) if (_allBlocks[i].type === type) return _allBlocks[i];
+  return { type: type, label: type, color: 'var(--accent)', bg: 'var(--accent-dim)', icon: '?' };
+}
+
+// ─── Palette rendering ────────────────────────────
+function zeBuildPalette() {
+  function renderPalette(containerId, blocks) {
+    var c = document.getElementById(containerId);
+    if (!c) return;
+    c.innerHTML = blocks.map(function(b) {
+      return '<div draggable="true" data-block-type="' + b.type + '" ondragstart="zePaletteDragStart(event)"'
+        + ' style="display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;background:' + b.bg + ';border:1px solid ' + b.color + '33;cursor:grab;user-select:none;transition:transform .1s"'
+        + ' onmouseover="this.style.transform=\'scale(1.02)\'" onmouseout="this.style.transform=\'\'">'
+        + '<span style="font-size:18px;line-height:1">' + b.icon + '</span>'
+        + '<span style="font-size:12.5px;font-weight:600;color:var(--text)">' + b.label + '</span>'
+        + '</div>';
+    }).join('');
+  }
+  renderPalette('block-palette', _visionBlocks);
+  renderPalette('logic-palette', _logicBlocks);
+  renderPalette('action-palette', _actionBlocks);
+}
+
+// ─── Drag from palette ────────────────────────────
+var _zeDropBlockType = null;
+
+function zePaletteDragStart(e) {
+  _zeDropBlockType = e.currentTarget.getAttribute('data-block-type');
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', _zeDropBlockType);
+  var overlay = document.getElementById('ze-drop-overlay');
+  if (overlay) overlay.style.display = 'block';
+}
+
+function zeCanvasDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }
+
+function zeCanvasDrop(e) {
+  e.preventDefault();
+  var overlay = document.getElementById('ze-drop-overlay');
+  if (overlay) overlay.style.display = 'none';
+  var type = _zeDropBlockType || e.dataTransfer.getData('text/plain');
+  if (!type) return;
+  var wrap = document.getElementById('ze-canvas-wrap');
+  var rect = wrap.getBoundingClientRect();
+  zeAddNode(type, e.clientX - rect.left - 80, e.clientY - rect.top - 30);
+  _zeDropBlockType = null;
+}
+
+function zeCanvasDragEnd() {
+  var overlay = document.getElementById('ze-drop-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// ─── Node management ─────────────────────────────
+function zeAddNode(type, x, y) {
+  var def = zeBlockDef(type);
+  var node = { id: 'n' + (_zeNextId++), type: type, x: Math.max(0, x), y: Math.max(0, y), label: def.label, color: def.color, bg: def.bg, icon: def.icon, props: {} };
+  _zeNodes.push(node);
+  var hint = document.getElementById('ze-canvas-hint');
+  if (hint) hint.style.display = 'none';
+  zeRenderNode(node);
+  zeSelectNode(node.id);
+}
+
+function zeRenderNode(node) {
+  var old = document.getElementById('node-' + node.id);
+  if (old) old.remove();
+
+  var el = document.createElement('div');
+  el.id  = 'node-' + node.id;
+  el.setAttribute('data-node-id', node.id);
+  el.style.cssText = 'position:absolute;left:' + node.x + 'px;top:' + node.y + 'px;'
+    + 'min-width:160px;background:var(--bg-card);border:2px solid ' + node.color + '66;border-radius:12px;'
+    + 'box-shadow:0 4px 18px rgba(0,0,0,.18);cursor:default;user-select:none;'
+    + 'transition:box-shadow .15s,border-color .15s;z-index:' + (node.id === _zeSelId ? 10 : 5);
+
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:' + node.bg + ';border-radius:10px 10px 0 0;cursor:move" data-drag-handle>'
+    + '<span style="font-size:20px;line-height:1">' + node.icon + '</span>'
+    + '<span style="font-size:12.5px;font-weight:700;color:var(--text);flex:1">' + node.label + '</span>'
+    + '<button onclick="zeRemoveNode(\'' + node.id + '\')" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:16px;line-height:1;padding:0">×</button>'
+    + '</div>'
+    + '<div style="padding:10px 12px;display:flex;flex-direction:column;gap:6px">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between">'
+    + '<div class="ze-port in"  data-node="' + node.id + '" data-port="in"  style="width:12px;height:12px;border-radius:50%;background:var(--border-mid);border:2px solid var(--text-muted);cursor:crosshair;flex-shrink:0" onmousedown="zePortMouseDown(event,\'' + node.id + '\',\'in\')" title="Input"></div>'
+    + '<span style="font-size:11px;color:var(--text-muted)">' + node.type + '</span>'
+    + '<div class="ze-port out" data-node="' + node.id + '" data-port="out" style="width:12px;height:12px;border-radius:50%;background:' + node.color + ';border:2px solid ' + node.color + ';cursor:crosshair;flex-shrink:0" onmousedown="zePortMouseDown(event,\'' + node.id + '\',\'out\')" title="Output"></div>'
+    + '</div></div>';
+
+  el.addEventListener('mousedown', function(e) {
+    if (e.target.closest('[data-drag-handle]')) zeNodeDragStart(e, node.id);
+    else if (!e.target.closest('.ze-port')) zeSelectNode(node.id);
+  });
+
+  document.getElementById('ze-nodes').appendChild(el);
+  if (node.id === _zeSelId) el.style.borderColor = node.color; else el.style.borderColor = node.color + '66';
+}
+
+function zeRemoveNode(id) {
+  _zeNodes = _zeNodes.filter(function(n) { return n.id !== id; });
+  _zeEdges = _zeEdges.filter(function(e) { return e.from !== id && e.to !== id; });
+  var el = document.getElementById('node-' + id);
+  if (el) el.remove();
+  if (_zeSelId === id) { _zeSelId = null; zeRenderProps(null); }
+  zeDrawEdges();
+  if (_zeNodes.length === 0) { var h = document.getElementById('ze-canvas-hint'); if (h) h.style.display = 'flex'; }
+}
+
+function zeSelectNode(id) {
+  _zeSelId = id;
+  _zeNodes.forEach(function(n) {
+    var el = document.getElementById('node-' + n.id);
+    if (el) {
+      if (n.id === id) { el.style.borderColor = n.color; el.style.boxShadow = '0 0 0 3px ' + n.color + '33,0 6px 24px rgba(0,0,0,.22)'; el.style.zIndex = 10; }
+      else { el.style.borderColor = n.color + '66'; el.style.boxShadow = '0 4px 18px rgba(0,0,0,.18)'; el.style.zIndex = 5; }
+    }
+  });
+  var node = _zeNodes.find(function(n) { return n.id === id; });
+  zeRenderProps(node || null);
+}
+
+// ─── Node dragging ────────────────────────────────
+function zeNodeDragStart(e, nodeId) {
+  e.preventDefault();
+  var node = _zeNodes.find(function(n) { return n.id === nodeId; });
+  if (!node) return;
+  zeSelectNode(nodeId);
+  var startX = e.clientX - node.x;
+  var startY = e.clientY - node.y;
+  function onMove(me) {
+    var wrap = document.getElementById('ze-canvas-wrap');
+    if (!wrap) return;
+    var rect = wrap.getBoundingClientRect();
+    node.x = Math.max(0, Math.min(me.clientX - startX, wrap.offsetWidth - 180));
+    node.y = Math.max(0, Math.min(me.clientY - startY, wrap.offsetHeight - 80));
+    var el = document.getElementById('node-' + nodeId);
+    if (el) { el.style.left = node.x + 'px'; el.style.top = node.y + 'px'; }
+    zeDrawEdges();
+  }
+  function onUp() {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+// ─── Port / edge connection ───────────────────────
+var _zeConnPath = null;
+
+function zePortMouseDown(e, nodeId, port) {
+  e.stopPropagation(); e.preventDefault();
+  if (port === 'out') {
+    _zeConnFrom = nodeId;
+    var svg = document.getElementById('ze-svg');
+    _zeConnPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    _zeConnPath.setAttribute('fill', 'none');
+    _zeConnPath.setAttribute('stroke', 'var(--accent)');
+    _zeConnPath.setAttribute('stroke-width', '2');
+    _zeConnPath.setAttribute('stroke-dasharray', '6 3');
+    svg.appendChild(_zeConnPath);
+    function onMove(me) { zeUpdateConnPath(me.clientX, me.clientY); }
+    function onUp(me) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      var target = document.elementFromPoint(me.clientX, me.clientY);
+      var portEl = target && target.closest ? target.closest('.ze-port.in') : null;
+      if (portEl) {
+        var toId = portEl.getAttribute('data-node');
+        if (toId && toId !== _zeConnFrom) {
+          _zeEdges.push({ from: _zeConnFrom, to: toId });
+          zeDrawEdges();
+        }
+      }
+      if (_zeConnPath) { _zeConnPath.remove(); _zeConnPath = null; }
+      _zeConnFrom = null;
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+}
+
+function zePortCenter(nodeId, port) {
+  var el = document.getElementById('node-' + nodeId);
+  if (!el) return { x: 0, y: 0 };
+  var wrap = document.getElementById('ze-canvas-wrap');
+  var wr   = wrap.getBoundingClientRect();
+  var portEl = el.querySelector('.ze-port.' + port);
+  if (!portEl) return { x: parseInt(el.style.left) + 80, y: parseInt(el.style.top) + 40 };
+  var pr = portEl.getBoundingClientRect();
+  return { x: pr.left - wr.left + pr.width / 2, y: pr.top - wr.top + pr.height / 2 };
+}
+
+function zeUpdateConnPath(mx, my) {
+  if (!_zeConnPath || !_zeConnFrom) return;
+  var wrap = document.getElementById('ze-canvas-wrap');
+  if (!wrap) return;
+  var wr = wrap.getBoundingClientRect();
+  var from = zePortCenter(_zeConnFrom, 'out');
+  var tx = mx - wr.left;
+  var ty = my - wr.top;
+  var cx = (from.x + tx) / 2;
+  _zeConnPath.setAttribute('d', 'M' + from.x + ',' + from.y + ' C' + cx + ',' + from.y + ' ' + cx + ',' + ty + ' ' + tx + ',' + ty);
+}
+
+function zeDrawEdges() {
+  var svg = document.getElementById('ze-svg');
+  if (!svg) return;
+  var existing = svg.querySelectorAll('.ze-edge');
+  existing.forEach(function(el) { el.remove(); });
+  _zeEdges.forEach(function(edge) {
+    var from = zePortCenter(edge.from, 'out');
+    var to   = zePortCenter(edge.to,   'in');
+    var cx   = (from.x + to.x) / 2;
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('class', 'ze-edge');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'var(--accent)');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('d', 'M' + from.x + ',' + from.y + ' C' + cx + ',' + from.y + ' ' + cx + ',' + to.y + ' ' + to.x + ',' + to.y);
+    svg.appendChild(path);
+  });
+}
+
+// ─── Properties panel ─────────────────────────────
+function zeRenderProps(node) {
+  var c = document.getElementById('ze-props-content');
+  if (!c) return;
+  if (!node) { c.innerHTML = '<div style="font-size:13px;color:var(--text-muted)">Select a node to configure it</div>'; return; }
+  var rows = '';
+  if (node.type === 'ppe') {
+    rows = '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Require PPE</label>'
+      + '<div style="display:flex;flex-direction:column;gap:5px;margin:6px 0 12px">'
+      + ['Helmet','Safety Vest','Gloves','Safety Glasses'].map(function(p) {
+          return '<label style="display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text);cursor:pointer">'
+            + '<input type="checkbox" checked style="cursor:pointer"> ' + p + '</label>';
+        }).join('')
+      + '</div>';
+  } else if (node.type === 'zone') {
+    rows = '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Zone</label>'
+      + '<select style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg-input);color:var(--text);font-family:var(--font);font-size:12.5px;margin:5px 0 12px;cursor:pointer">'
+      + '<option>Danger Zone A</option><option>Restricted B</option><option>Machine C</option></select>';
+  } else if (node.type === 'delay') {
+    rows = '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Delay (seconds)</label>'
+      + '<input type="number" value="3" min="1" max="60" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg-input);color:var(--text);font-family:var(--font);font-size:13px;margin:5px 0 12px;box-sizing:border-box">';
+  } else if (node.type === 'alert') {
+    rows = '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Alert Level</label>'
+      + '<select style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg-input);color:var(--text);font-family:var(--font);font-size:12.5px;margin:5px 0 12px;cursor:pointer">'
+      + '<option>Warning</option><option>Alert</option><option>Emergency</option></select>';
+  } else if (node.type === 'line') {
+    rows = '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Message Template</label>'
+      + '<textarea rows="3" placeholder="⚠️ Safety event at {time}" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg-input);color:var(--text);font-family:var(--font);font-size:12px;margin:5px 0;resize:none;box-sizing:border-box"></textarea>';
+  }
+  rows += '<label style="font-size:12px;color:var(--text-sub);font-weight:600">Label</label>'
+    + '<input type="text" value="' + node.label + '" onchange="zeUpdateLabel(\'' + node.id + '\',this.value)" style="width:100%;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg-input);color:var(--text);font-family:var(--font);font-size:13px;margin:5px 0;box-sizing:border-box">';
+  c.innerHTML = '<div style="display:flex;align-items:center;gap:7px;margin-bottom:14px">'
+    + '<span style="font-size:20px">' + node.icon + '</span>'
+    + '<span style="font-size:13.5px;font-weight:700;color:var(--text)">' + node.label + '</span></div>'
+    + rows
+    + '<button onclick="zeRemoveNode(\'' + node.id + '\')" style="width:100%;margin-top:12px;height:32px;border:1px solid var(--red-dim);border-radius:8px;background:transparent;color:var(--red);font-family:var(--font);font-size:12.5px;cursor:pointer">Remove Node</button>';
+}
+
+function zeUpdateLabel(nodeId, val) {
+  var node = _zeNodes.find(function(n) { return n.id === nodeId; });
+  if (node) { node.label = val; zeRenderNode(node); zeSelectNode(nodeId); }
+}
+
+// ─── Rules list ───────────────────────────────────
+var _zeRules = [];
+
+function zeRenderRuleList() {
+  var c = document.getElementById('ze-rules-list');
+  if (!c) return;
+  if (_zeRules.length === 0) {
+    c.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:6px">No rules yet</div>';
+    return;
+  }
+  c.innerHTML = _zeRules.map(function(r, i) {
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:' + (i === _zeActiveRule ? 'var(--accent-dim)' : 'var(--bg-card-alt)') + ';border:1px solid ' + (i === _zeActiveRule ? 'var(--border-accent)' : 'var(--border)') + ';cursor:pointer" onclick="zeLoadRule(' + i + ')">'
+      + '<span style="width:8px;height:8px;border-radius:50%;background:' + (r.enabled ? 'var(--green)' : 'var(--border-mid)') + ';flex-shrink:0"></span>'
+      + '<span style="flex:1;font-size:12.5px;font-weight:600;color:var(--text)">' + ZENTRA.esc(r.name) + '</span>'
+      + '<button onclick="zeDeleteRule(event,' + i + ')" style="border:none;background:none;color:var(--text-muted);cursor:pointer;font-size:15px;line-height:1">×</button>'
+      + '</div>';
+  }).join('');
+}
+
+var _zeActiveRule = -1;
+
+function zeNewRule() {
+  _zeRules.push({ name: 'Rule ' + (_zeRules.length + 1), enabled: true, nodes: [], edges: [] });
+  _zeActiveRule = _zeRules.length - 1;
+  _zeNodes = []; _zeEdges = [];
+  var nc = document.getElementById('ze-nodes');
+  if (nc) nc.innerHTML = '';
+  zeDrawEdges();
+  zeRenderRuleList();
+  var h = document.getElementById('ze-canvas-hint');
+  if (h) h.style.display = 'flex';
+}
+
+function zeLoadRule(i) {
+  if (_zeActiveRule >= 0 && _zeActiveRule < _zeRules.length) {
+    _zeRules[_zeActiveRule].nodes = _zeNodes.map(function(n) { return Object.assign({}, n); });
+    _zeRules[_zeActiveRule].edges = _zeEdges.slice();
+  }
+  _zeActiveRule = i;
+  var rule = _zeRules[i];
+  _zeNodes = rule.nodes || [];
+  _zeEdges = rule.edges || [];
+  var nc = document.getElementById('ze-nodes');
+  if (nc) nc.innerHTML = '';
+  _zeNodes.forEach(function(n) { zeRenderNode(n); });
+  zeDrawEdges();
+  var h = document.getElementById('ze-canvas-hint');
+  if (h) h.style.display = _zeNodes.length > 0 ? 'none' : 'flex';
+  zeRenderRuleList();
+}
+
+function zeDeleteRule(e, i) {
+  e.stopPropagation();
+  _zeRules.splice(i, 1);
+  if (_zeActiveRule === i) {
+    _zeActiveRule = -1;
+    _zeNodes = []; _zeEdges = [];
+    var nc = document.getElementById('ze-nodes');
+    if (nc) nc.innerHTML = '';
+    zeDrawEdges();
+    var h = document.getElementById('ze-canvas-hint');
+    if (h) h.style.display = 'flex';
+  } else if (_zeActiveRule > i) {
+    _zeActiveRule--;
+  }
+  zeRenderRuleList();
+}
+
+// ─── Mode toggle ──────────────────────────────────
+function zeSetMode(mode) {
+  _zeMode = mode;
+  var rp = document.getElementById('rule-panel');
+  var zp = document.getElementById('zone-panel');
+  var rb = document.getElementById('mode-rule-btn');
+  var zb = document.getElementById('mode-zone-btn');
+  if (mode === 'rule') {
+    if (rp) rp.style.display = 'flex';
+    if (zp) zp.style.display = 'none';
+    if (rb) { rb.style.background = 'var(--accent)'; rb.style.color = '#fff'; }
+    if (zb) { zb.style.background = 'transparent'; zb.style.color = 'var(--text-sub)'; }
+  } else {
+    if (rp) rp.style.display = 'none';
+    if (zp) zp.style.display = 'flex';
+    if (rb) { rb.style.background = 'transparent'; rb.style.color = 'var(--text-sub)'; }
+    if (zb) { zb.style.background = 'var(--accent)'; zb.style.color = '#fff'; }
+    zeInitZoneCanvas();
+  }
+}
+
+// ─── Zone drawing (canvas) ────────────────────────
+var _zonePoints = [];
+var _zoneCtx    = null;
+var _zoneBg     = null;
+
+function zeInitZoneCanvas() {
+  var canvas = document.getElementById('zone-canvas');
+  if (!canvas) return;
+  _zoneCtx = canvas.getContext('2d');
+  canvas.width  = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  if (ZENTRA._lastFrame) {
+    var bg = document.getElementById('zone-bg');
+    if (bg) bg.src = ZENTRA._lastFrame;
+  }
+  // Populate camera dropdown, apply type highlight, load this camera's zones
+  var sel = document.getElementById('zone-cam-select');
+  if (sel && !sel.options.length) {
+    sel.innerHTML = _zoneCams.map(function(c) { return '<option value="' + ZENTRA.esc(c.id) + '">' + ZENTRA.esc(c.name) + '</option>'; }).join('');
+    sel.value = _zoneCamId;
+  }
+  zoneSetType(_zoneType);
+  zoneUpdateSaveBtn();
+  zoneLoadList();
+
+  function evtPos(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (canvas.width / r.width),
+             y: (e.clientY - r.top)  * (canvas.height / r.height) };
+  }
+  function nearestVertex(p) {
+    var best = -1, bd = 13 * 13;   // 13px grab radius (squared)
+    for (var i = 0; i < _zonePoints.length; i++) {
+      var dx = _zonePoints[i].x - p.x, dy = _zonePoints[i].y - p.y, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  canvas.onmousedown = function(e) {
+    var p = evtPos(e), idx = nearestVertex(p);
+    if (idx >= 0) { _zoneDragIdx = idx; }   // grab an existing corner to move it
+    else { _zonePoints.push(p); }           // click empty space → add a corner
+    zeDrawZone();
+  };
+  canvas.onmousemove = function(e) {
+    var p = evtPos(e);
+    if (_zoneDragIdx >= 0) { _zonePoints[_zoneDragIdx] = p; zeDrawZone(); return; }
+    var idx = nearestVertex(p);
+    canvas.style.cursor = (idx >= 0) ? 'grab' : 'crosshair';
+    if (idx !== _zoneHoverIdx) { _zoneHoverIdx = idx; zeDrawZone(); }
+  };
+  canvas.onmouseup    = function() { _zoneDragIdx = -1; };
+  canvas.onmouseleave = function() { _zoneDragIdx = -1; _zoneHoverIdx = -1; zeDrawZone(); };
+}
+
+// Edit/drag state
+var _zoneEditId   = null;   // id being edited (null = drawing a new zone)
+var _zoneEditName = null;   // current name when editing
+var _zoneDragIdx  = -1;     // vertex index being dragged
+var _zoneHoverIdx = -1;     // vertex index hovered
+
+function zoneTypeColors() {
+  // Only danger zones exist now (exclusion was removed to reduce confusion).
+  return { stroke: 'rgba(239,68,68,.95)', fill: 'rgba(239,68,68,.16)', dot: '#ef4444' };
+}
+
+function zeDrawZone() {
+  if (!_zoneCtx) return;
+  var canvas = document.getElementById('zone-canvas');
+  var c = zoneTypeColors();
+  var n = _zonePoints.length;
+  _zoneCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // polygon body
+  if (n >= 2) {
+    _zoneCtx.beginPath();
+    _zoneCtx.moveTo(_zonePoints[0].x, _zonePoints[0].y);
+    for (var i = 1; i < n; i++) _zoneCtx.lineTo(_zonePoints[i].x, _zonePoints[i].y);
+    if (n >= 3) { _zoneCtx.closePath(); _zoneCtx.fillStyle = c.fill; _zoneCtx.fill(); }
+    _zoneCtx.strokeStyle = c.stroke; _zoneCtx.lineWidth = 2.5; _zoneCtx.lineJoin = 'round'; _zoneCtx.stroke();
+  }
+  // vertices (draggable handles)
+  for (var j = 0; j < n; j++) {
+    var pt = _zonePoints[j];
+    var active = (j === _zoneDragIdx || j === _zoneHoverIdx);
+    _zoneCtx.beginPath();
+    _zoneCtx.arc(pt.x, pt.y, active ? 8 : 6, 0, Math.PI * 2);
+    _zoneCtx.fillStyle = '#fff'; _zoneCtx.fill();
+    _zoneCtx.lineWidth = active ? 3 : 2; _zoneCtx.strokeStyle = c.stroke; _zoneCtx.stroke();
+    if (j === 0) {  // mark the first vertex
+      _zoneCtx.beginPath(); _zoneCtx.arc(pt.x, pt.y, 2.6, 0, Math.PI * 2);
+      _zoneCtx.fillStyle = c.dot; _zoneCtx.fill();
+    }
+  }
+}
+
+function zoneUndo() { _zonePoints.pop(); zeDrawZone(); }
+
+function zoneClear() {
+  _zonePoints = []; _zoneDragIdx = -1; _zoneHoverIdx = -1;
+  if (_zoneCtx) {
+    var canvas = document.getElementById('zone-canvas');
+    _zoneCtx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+}
+
+function zoneUpdateSaveBtn() {
+  var btn = document.getElementById('zone-save-btn');
+  if (btn) btn.innerHTML = _zoneEditId ? '✏️ อัปเดตโซน' : '💾 บันทึกโซน';
+}
+
+function zoneNewDraw() {  // exit edit mode → start a fresh zone
+  _zoneEditId = null; _zoneEditName = null;
+  zoneClear(); zoneUpdateSaveBtn(); zoneLoadList();
+}
+
+// ─── Zone drawing: camera + type state ────────────
+var _zoneCamId  = 'cam0';
+var _zoneType   = 'danger';
+var _zoneCams   = [{ id: 'cam0', name: 'Camera #1' }];
+
+function zoneSetType() {
+  // Exclusion removed — every zone is a danger zone now.
+  _zoneType = 'danger';
+}
+
+function zoneOnCamChange() {
+  var sel = document.getElementById('zone-cam-select');
+  if (sel) _zoneCamId = sel.value;
+  zoneClear();
+  zoneLoadList();
+}
+
+// Map canvas-pixel polygon → normalized 0–1 in the video's contain-fitted area
+// (the bg <img> uses object-fit:contain, so it may be letterboxed in the canvas).
+function zoneNormalizePoints(pts, canvas, bg) {
+  var cw = canvas.width, ch = canvas.height;
+  var iw = (bg && bg.naturalWidth)  || cw;
+  var ih = (bg && bg.naturalHeight) || ch;
+  var scale = Math.min(cw / iw, ch / ih);
+  var dw = iw * scale, dh = ih * scale;
+  var ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+  return pts.map(function(p) {
+    var nx = (p.x - ox) / dw, ny = (p.y - oy) / dh;
+    return [Math.max(0, Math.min(1, +nx.toFixed(4))), Math.max(0, Math.min(1, +ny.toFixed(4)))];
+  });
+}
+
+// Reverse of zoneNormalizePoints: normalized 0–1 → canvas pixels
+function zoneDenormalize(norm, canvas, bg) {
+  var cw = canvas.width, ch = canvas.height;
+  var iw = (bg && bg.naturalWidth)  || cw;
+  var ih = (bg && bg.naturalHeight) || ch;
+  var scale = Math.min(cw / iw, ch / ih);
+  var dw = iw * scale, dh = ih * scale;
+  var ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+  return (norm || []).map(function(p) {
+    var x = Array.isArray(p) ? p[0] : p.x, y = Array.isArray(p) ? p[1] : p.y;
+    return { x: ox + x * dw, y: oy + y * dh };
+  });
+}
+
+async function zoneSave() {
+  if (_zonePoints.length < 3) { ZENTRA.toast('กรุณาวาดโซนอย่างน้อย 3 จุด', 'warn'); return; }
+  var canvas = document.getElementById('zone-canvas');
+  var bg     = document.getElementById('zone-bg');
+  var norm   = zoneNormalizePoints(_zonePoints, canvas, bg);
+  var dflt   = _zoneEditName || 'พื้นที่อันตราย';
+  var name   = await ZENTRA.prompt('ตั้งชื่อพื้นที่', dflt, { placeholder: 'ชื่อพื้นที่' });
+  if (name === null) return;
+  name = (name || '').trim() || dflt;
+  var payload = {
+    name: name, type: 'danger',
+    color: '#ef4444',
+    points: norm, camera_id: _zoneCamId,
+  };
+  var editing = !!_zoneEditId;
+  var url = editing ? ('/api/zones/' + _zoneEditId) : '/api/zones';
+  fetch(url, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+      _zoneEditId = null; _zoneEditName = null;
+      zoneClear(); zoneUpdateSaveBtn(); zoneLoadList();
+      ZENTRA.toast((editing ? 'อัปเดต' : 'บันทึก') + 'โซน "' + name + '" แล้ว · ระบบตรวจจับใช้งานทันที', 'success');
+    })
+    .catch(function() { ZENTRA.toast('บันทึกไม่สำเร็จ', 'error'); });
+}
+
+function zoneEditLoad(id) {
+  fetch('/api/zones').then(function(r) { return r.json(); }).then(function(zones) {
+    var z = (zones || []).find(function(x) { return x.id === id; });
+    if (!z) return;
+    var canvas = document.getElementById('zone-canvas');
+    var bg     = document.getElementById('zone-bg');
+    _zonePoints   = zoneDenormalize(z.points || [], canvas, bg);
+    _zoneEditId   = z.id;
+    _zoneEditName = z.name || '';
+    _zoneDragIdx  = -1; _zoneHoverIdx = -1;
+    zoneSetType(z.type || 'danger');
+    zeDrawZone(); zoneUpdateSaveBtn(); zoneLoadList();
+  }).catch(function() {});
+}
+
+function zoneLoadList() {
+  var box = document.getElementById('zone-saved-list');
+  if (!box) return;
+  fetch('/api/zones').then(function(r) { return r.json(); }).then(function(zones) {
+    var mine = (zones || []).filter(function(z) { return (z.camera_id || 'cam0') === _zoneCamId; });
+    var head = '<button onclick="zoneNewDraw()" style="width:100%;height:30px;margin-bottom:9px;border:1.5px dashed var(--border-mid);border-radius:7px;background:transparent;color:var(--text-sub);font-family:var(--font);font-size:12px;cursor:pointer">＋ กำหนดพื้นที่ใหม่</button>';
+    if (mine.length === 0) {
+      box.innerHTML = head + '<div style="font-size:12px;color:var(--text-muted);font-style:italic">ยังไม่ได้กำหนดพื้นที่สำหรับกล้องนี้</div>';
+      return;
+    }
+    box.innerHTML = head + mine.map(function(z) {
+      var col = '#ef4444';
+      var editing = (z.id === _zoneEditId);
+      return '<div onclick="zoneEditLoad(' + z.id + ')" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;background:var(--bg-card-alt);border:1px solid ' + (editing ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer" title="คลิกเพื่อแก้ไข">'
+        + '<span style="width:9px;height:9px;border-radius:2px;background:' + col + ';flex-shrink:0"></span>'
+        + '<div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ZENTRA.esc(z.name || 'Zone') + (editing ? ' ✏️' : '') + '</div>'
+        + '<div style="font-size:10.5px;color:var(--text-muted)">อันตราย · ' + (z.points || []).length + ' จุด</div></div>'
+        + '<button onclick="event.stopPropagation();zoneDelete(' + z.id + ')" title="ลบ" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--red);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>'
+        + '</div>';
+    }).join('');
+  }).catch(function() {});
+}
+
+async function zoneDelete(id) {
+  if (!(await ZENTRA.confirm('ต้องการลบโซนนี้หรือไม่?', { danger: true, okText: 'ลบ' }))) return;
+  fetch('/api/zones/' + id, { method: 'DELETE' }).then(function() {
+    if (_zoneEditId === id) { _zoneEditId = null; _zoneEditName = null; zoneClear(); zoneUpdateSaveBtn(); }
+    zoneLoadList();
+    ZENTRA.toast('ลบโซนแล้ว', 'success');
+  }).catch(function() { ZENTRA.toast('ลบไม่สำเร็จ', 'error'); });
+}
+
+// ─── Save / clear rules ───────────────────────────
+function zeSave() {
+  if (_zeActiveRule >= 0 && _zeActiveRule < _zeRules.length) {
+    _zeRules[_zeActiveRule].nodes = _zeNodes.map(function(n) { return Object.assign({}, n); });
+    _zeRules[_zeActiveRule].edges = _zeEdges.slice();
+  }
+  var payload = { rules: _zeRules };
+  fetch('/api/zone/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function(r) { return r.json(); }).then(function() {
+      var btn = document.querySelector('[onclick="zeSave()"]');
+      if (btn) { var orig = btn.textContent; btn.textContent = 'Saved ✓'; setTimeout(function() { btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> Save Rules'; }, 1800); }
+    }).catch(function() {});
+}
+
+function zeClear() {
+  _zeNodes = []; _zeEdges = []; _zeSelId = null;
+  var nc = document.getElementById('ze-nodes');
+  if (nc) nc.innerHTML = '';
+  zeDrawEdges();
+  zeRenderProps(null);
+  var h = document.getElementById('ze-canvas-hint');
+  if (h) h.style.display = 'flex';
+}
+
+// ─── Init ─────────────────────────────────────────
+function init_zone_editor() {
+  _zeNodes = []; _zeEdges = []; _zeNextId = 1; _zeSelId = null;
+  _zeRules = []; _zeActiveRule = -1;
+  var nc = document.getElementById('ze-nodes');
+  if (nc) nc.innerHTML = '';
+  zeDrawEdges();
+
+  zeBuildPalette();
+  zeRenderRuleList();
+
+  // Wire canvas drop events
+  var wrap = document.getElementById('ze-canvas-wrap');
+  if (wrap) {
+    wrap.addEventListener('dragover',  zeCanvasDragOver);
+    wrap.addEventListener('drop',      zeCanvasDrop);
+    wrap.addEventListener('dragend',   zeCanvasDragEnd);
+  }
+
+  // Default to Zone Drawing (Rule Builder is hidden — future feature).
+  zeSetMode('zone');
+
+  // Handoff from the Cameras "Set Detection Roles" modal: pre-select a camera
+  // and (optionally) open a specific saved zone for editing.
+  var pend = ZENTRA._pendingZoneEdit;
+  if (pend) {
+    ZENTRA._pendingZoneEdit = null;
+    if (pend.camId) {
+      _zoneCamId = pend.camId;
+      var sel = document.getElementById('zone-cam-select');
+      if (sel) sel.value = pend.camId;
+    }
+    if (pend.zoneId) zoneEditLoad(pend.zoneId);
+    else zoneNewDraw();
+    zoneLoadList();
+  }
+}
+</script>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ZENTRA — Story Board</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Sarabun', sans-serif;
+    background: #f5f5f5;
+    color: #1a1a1a;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .cover {
+    width: 210mm;
+    min-height: 100mm;
+    margin: 20px auto;
+    background: #0d1b2a;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    border-radius: 8px;
+  }
+
+  .cover h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 4px;
+    color: #7ecfff;
+  }
+
+  .cover p {
+    margin-top: 8px;
+    font-size: 15px;
+    opacity: 0.7;
+  }
+
+  .cover .subtitle {
+    margin-top: 16px;
+    font-size: 13px;
+    opacity: 0.5;
+    border-top: 1px solid rgba(255,255,255,0.2);
+    padding-top: 12px;
+    text-align: center;
+  }
+
+  .screen-block {
+    width: 210mm;
+    margin: 20px auto;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+    overflow: hidden;
+    page-break-inside: avoid;
+  }
+
+  .screen-header {
+    background: #0d1b2a;
+    color: white;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .screen-number {
+    background: #7ecfff;
+    color: #0d1b2a;
+    font-weight: 700;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .screen-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .screen-body {
+    display: flex;
+    gap: 0;
+  }
+
+  .screen-image-wrap {
+    flex: 0 0 340px;
+    position: relative;
+    background: #111;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12px;
+  }
+
+  .screen-image-wrap img {
+    width: 100%;
+    border-radius: 4px;
+    display: block;
+  }
+
+  /* Callout bubbles overlaid on image */
+  .callout {
+    position: absolute;
+    background: #ff4757;
+    color: white;
+    font-weight: 700;
+    font-size: 11px;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    cursor: default;
+  }
+
+  .screen-desc {
+    flex: 1;
+    padding: 16px 20px;
+  }
+
+  .screen-desc h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #888;
+    margin-bottom: 10px;
+  }
+
+  .desc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 16px 0;
+  }
+
+  .desc-list li {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: flex-start;
+    font-size: 13.5px;
+  }
+
+  .desc-num {
+    background: #ff4757;
+    color: white;
+    font-weight: 700;
+    font-size: 11px;
+    border-radius: 50%;
+    min-width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .desc-text strong {
+    color: #0d1b2a;
+  }
+
+  .transition-box {
+    background: #eef8ff;
+    border-left: 4px solid #7ecfff;
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+  }
+
+  .transition-box .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #5599cc;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .note-box {
+    background: #fff8e1;
+    border-left: 4px solid #ffc107;
+    padding: 8px 12px;
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: #7a5c00;
+    margin-top: 8px;
+  }
+
+  @media print {
+    body { background: white; }
+    .screen-block, .cover { box-shadow: none; margin: 10px auto; }
+    .screen-block { page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <h1>ZENTRA</h1>
+  <p>Safety AI System — Story Board</p>
+  <div class="subtitle">
+    เอกสารอธิบายหน้าจอและการทำงานของระบบ ZENTRA Safety AI<br>
+    จัดทำสำหรับ CEDT Innovation Summit 2026 — IndustryTech Track
+  </div>
+</div>
+
+<!-- SCREEN 1: Splash -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">1</div>
+    <h2>Splash Screen — หน้าเปิดระบบ</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="1.png" alt="Splash Screen">
+      <!-- Callout positions are approximate, adjust top/left as needed -->
+      <div class="callout" style="top:28px; left:55px;">1</div>
+      <div class="callout" style="top:72%; left:18px;">2</div>
+      <div class="callout" style="top:87%; left:18px;">3</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>โลโก้ ZENTRA Safety AI System</strong> — แสดงตราสัญลักษณ์และชื่อแอปพลิเคชัน ใช้ยืนยันตัวตนของซอฟต์แวร์แก่ผู้ใช้</div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>Progress Bar</strong> — แสดงความคืบหน้าการโหลดทรัพยากรของระบบ ได้แก่ ไฟล์ตั้งค่า (config), น้ำหนักโมเดล AI (model weights) และ API Keys ต่าง ๆ</div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>ข้อความสถานะ "กำลังโหลดการตั้งค่า..."</strong> — แจ้งให้ผู้ใช้ทราบว่าระบบกำลังเตรียมพร้อม ไม่ได้ค้างหรือเกิดข้อผิดพลาด</div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        เมื่อโหลดเสร็จสมบูรณ์ ระบบจะเปลี่ยนไปยังหน้า <strong>เลือกแหล่งภาพ</strong> โดยอัตโนมัติ<br>
+        หากโหลดไม่สำเร็จ (เช่น ไฟล์ config หาย หรือ API Key ไม่ถูกต้อง) จะแสดงข้อความแจ้งข้อผิดพลาดและหยุดการทำงานของระบบ
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 2: Source Selection -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">2</div>
+    <h2>Source Selection — หน้าเลือกแหล่งภาพ</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="2.png" alt="Source Selection">
+      <div class="callout" style="top:14%; left:12%;">1</div>
+      <div class="callout" style="top:34%; left:12%;">2</div>
+      <div class="callout" style="top:48%; left:12%;">3</div>
+      <div class="callout" style="top:62%; left:12%;">4</div>
+      <div class="callout" style="top:76%; left:12%;">5</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>หัวข้อ "เลือกแหล่งภาพ"</strong> — ระบุจุดประสงค์ของหน้า เพื่อให้ผู้ใช้เลือกว่าจะนำวิดีโอมาจากแหล่งใด</div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>Webcam (USB)</strong> — เชื่อมต่อกล้อง USB ที่ต่อกับเครื่องโดยตรง เป็นตัวเลือก default (ถูกเลือกไว้) แสดงด้วยจุดสีฟ้า</div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>RTSP Stream</strong> — รับสัญญาณจาก IP Camera ผ่าน URL รูปแบบ rtsp://... เหมาะสำหรับกล้องวงจรปิดในโรงงาน</div>
+        </li>
+        <li>
+          <div class="desc-num">4</div>
+          <div class="desc-text"><strong>ไฟล์คอมพิวเตอร์</strong> — เลือกไฟล์วิดีโอจากเครื่อง (mp4, avi ฯลฯ) เหมาะสำหรับทดสอบระบบโดยไม่ต้องใช้กล้องสด</div>
+        </li>
+        <li>
+          <div class="desc-num">5</div>
+          <div class="desc-text"><strong>อื่น ๆ ในคอมพิวเตอร์</strong> — แหล่งภาพทางเลือกอื่น เช่น virtual camera หรืออุปกรณ์จับภาพอื่น ๆ ที่ระบบรู้จัก</div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        เมื่อผู้ใช้เลือกแหล่งภาพและกดยืนยัน ระบบจะพยายามเปิดกล้อง / สตรีม<br>
+        หากเปิดสำเร็จ → เข้าสู่หน้า <strong>Live Dashboard</strong><br>
+        หากเปิดไม่ได้ → แสดงข้อผิดพลาด "ไม่พบอุปกรณ์" และกลับสู่หน้านี้เพื่อให้เลือกใหม่
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 3: Live Dashboard -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">3</div>
+    <h2>Live Dashboard — หน้าแสดงผลสดจากกล้อง</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="3.png" alt="Live Dashboard">
+      <div class="callout" style="top:4%; right:40%;">1</div>
+      <div class="callout" style="top:30%; left:18%;">2</div>
+      <div class="callout" style="top:30%; left:55%;">3</div>
+      <div class="callout" style="top:6%; right:8%;">4</div>
+      <div class="callout" style="top:48%; right:8%;">5</div>
+      <div class="callout" style="top:72%; left:28%;">6</div>
+      <div class="callout" style="bottom:5%; left:42%;">7</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>Navigation Bar</strong> — แถบเมนูหลัก 4 แท็บ (Live Dashboard, Zone Editor, History, Setting) ใช้สลับหน้าการทำงาน</div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>Video Feed + Bounding Box</strong> — ภาพกล้องสดพร้อมกรอบวิเคราะห์:
+            <br>• <span style="color:green;font-weight:600;">กรอบสีเขียว</span> = PPE OK (สวมอุปกรณ์ครบ)
+            <br>• <span style="color:red;font-weight:600;">กรอบสีแดง</span> = ตรวจพบความผิดปกติ (เช่น No Helmet)
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>Danger Zone Overlay</strong> — พื้นที่โซนอันตรายที่กำหนดไว้ใน Zone Editor แสดงทับบนภาพกล้องในแบบ semi-transparent</div>
+        </li>
+        <li>
+          <div class="desc-num">4</div>
+          <div class="desc-text"><strong>สถานะระบบ (Module Status)</strong> — แสดงสถานะของแต่ละโมดูล AI:
+            <br>• 🔴 PPE Module ไม่ปกติ — ตรวจพบผู้ที่ไม่ครบอุปกรณ์
+            <br>• 🟢 Zone Module ปกติ
+            <br>• 🟢 Fall Module ปกติ
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">5</div>
+          <div class="desc-text"><strong>สถิติการแจ้งเตือน</strong> — นับจำนวนเหตุการณ์สะสมในรอบวัน แบ่งเป็น: รวมทั้งหมด (2) / Warning (0) / Emergency (1)</div>
+        </li>
+        <li>
+          <div class="desc-num">6</div>
+          <div class="desc-text"><strong>แบนเนอร์ EMERGENCY</strong> — แสดงเหตุการณ์ฉุกเฉินล่าสุดพร้อมเวลา (14:32:07) และกล้องที่ตรวจพบ (Camera 1) สีแดงดึงดูดความสนใจทันที</div>
+        </li>
+        <li>
+          <div class="desc-num">7</div>
+          <div class="desc-text"><strong>ปุ่ม ···</strong> — เมนูเพิ่มเติม เช่น ขยายภาพเต็มจอ หรือบันทึก snapshot ของเหตุการณ์</div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        หน้าจอนี้ refresh อัตโนมัติตลอดเวลา (real-time)<br>
+        กดแท็บใน Navigation Bar เพื่อสลับไปหน้า Zone Editor / History / Setting ได้ตลอด
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 4: Zone Editor -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">4</div>
+    <h2>Zone Editor — หน้าแก้ไขโซนความปลอดภัย</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="4.png" alt="Zone Editor">
+      <div class="callout" style="top:35%; left:10%;">1</div>
+      <div class="callout" style="top:20%; left:25%;">2</div>
+      <div class="callout" style="top:50%; left:45%;">3</div>
+      <div class="callout" style="top:48%; right:8%;">4</div>
+      <div class="callout" style="top:62%; right:8%;">5</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>Camera View</strong> — แสดงภาพกล้อง พร้อม polygon zone ที่วาดไว้ทับบนภาพ เพื่อให้ผู้ใช้เห็นตำแหน่งโซนจริง</div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>Zone A</strong> (สีแดง) — โซนอันตราย "เครื่องจักรอันตราย" สถานะ: <strong>แก้ไข</strong> — ผู้ใช้กำลังปรับขอบเขต</div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>Zone B</strong> (สีส้ม) — โซนระมัดระวัง "พื้นที่การผลิต" สถานะ: <strong>กำลังปรับปรุง</strong> — กำลังแก้ไขรายละเอียด</div>
+        </li>
+        <li>
+          <div class="desc-num">4</div>
+          <div class="desc-text"><strong>ปุ่ม + เพิ่ม zone ใหม่</strong> — คลิกเพื่อเริ่มวาด polygon zone ใหม่บนภาพกล้อง</div>
+        </li>
+        <li>
+          <div class="desc-num">5</div>
+          <div class="desc-text"><strong>แผงแก้ไข Zone</strong> (ด้านขวา) ประกอบด้วย:
+            <br>• <strong>ชื่อ Zone</strong> — กรอกชื่อของโซน
+            <br>• <strong>สีตัวอย่าง</strong> — เลือกสีแสดง polygon (color palette)
+            <br>• <strong>จำนวนจุด</strong> — แสดง 4/8 จุด (วางจุดได้สูงสุด 8 จุด)
+          </div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        เมื่อบันทึก Zone ระบบจะ apply การเปลี่ยนแปลงทันทีใน Live Dashboard<br>
+        สามารถ drag จุดบน polygon เพื่อปรับขอบเขตพื้นที่ได้แบบ real-time
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 5: History -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">5</div>
+    <h2>History — หน้าประวัติเหตุการณ์</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="5.png" alt="History">
+      <div class="callout" style="top:8%; left:5%;">1</div>
+      <div class="callout" style="top:38%; left:5%;">2</div>
+      <div class="callout" style="top:80%; left:5%;">3</div>
+      <div class="callout" style="top:15%; right:4%;">4</div>
+      <div class="callout" style="top:72%; right:14%;">5</div>
+      <div class="callout" style="top:84%; right:4%;">6</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>สถิติสรุปวันนี้ (4 การ์ด)</strong>:
+            <br>• เหตุการณ์วันนี้: <strong>2 ครั้ง</strong>
+            <br>• Emergency สะสม: <strong>1 ครั้ง</strong>
+            <br>• PPE violations: <strong>3 ครั้ง</strong>
+            <br>• เวลาทำงาน: <strong>8 ชม. 34 นาที</strong>
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>กราฟแสดงความถี่การแจ้งเตือน</strong> — Bar chart แสดงจำนวนเหตุการณ์รายชั่วโมง ตั้งแต่ 08:00–14:00 ช่วยระบุเวลาที่เกิดเหตุบ่อยที่สุด</div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>สัดส่วนตามประเภท</strong> — แผนภูมิแท่งแสดงสัดส่วน: PPE 3 ครั้ง / Fall 1 ครั้ง ช่วยเข้าใจว่าปัญหาหลักคืออะไร</div>
+        </li>
+        <li>
+          <div class="desc-num">4</div>
+          <div class="desc-text"><strong>รายการแจ้งเตือนล่าสุด</strong> — แสดงเหตุการณ์ล่าสุดทางขวา พร้อมประเภท เวลา กล้อง และ Track ID ของบุคคลที่เกี่ยวข้อง</div>
+        </li>
+        <li>
+          <div class="desc-num">5</div>
+          <div class="desc-text"><strong>ปุ่ม โหลดเพิ่มเติม</strong> — แสดงรายการเหตุการณ์ย้อนหลังเพิ่มเติมในรายการขวา</div>
+        </li>
+        <li>
+          <div class="desc-num">6</div>
+          <div class="desc-text"><strong>ปุ่ม Export CSV / Export ทั้งหมด</strong> — ส่งออกข้อมูลประวัติเป็นไฟล์ CSV เพื่อนำไปวิเคราะห์ต่อหรือรายงานผู้บริหาร</div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        กดรายการในฝั่งขวา → เปิดรายละเอียดเหตุการณ์ (frame snapshot + เวลา + ข้อมูล Track)<br>
+        กด Export → บันทึกไฟล์ CSV ลงเครื่อง
+      </div>
+      <div class="note-box">
+        หมายเหตุ: สัดส่วน % ใน mockup แสดงเป็นค่า placeholder — ในระบบจริงจะคำนวณจากสัดส่วนจริง (PPE 75% / Fall 25%)
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN 6: Setting -->
+<div class="screen-block">
+  <div class="screen-header">
+    <div class="screen-number">6</div>
+    <h2>Setting — หน้าตั้งค่าระบบ</h2>
+  </div>
+  <div class="screen-body">
+    <div class="screen-image-wrap" style="position:relative;">
+      <img src="6.png" alt="Setting">
+      <div class="callout" style="top:20%; left:3%;">1</div>
+      <div class="callout" style="top:16%; left:28%;">2</div>
+      <div class="callout" style="top:36%; left:28%;">3</div>
+      <div class="callout" style="top:72%; left:28%;">4</div>
+      <div class="callout" style="bottom:4%; left:4%;">5</div>
+    </div>
+    <div class="screen-desc">
+      <h3>องค์ประกอบหน้าจอ</h3>
+      <ul class="desc-list">
+        <li>
+          <div class="desc-num">1</div>
+          <div class="desc-text"><strong>เมนูย่อยด้านซ้าย</strong> — 6 หัวข้อตั้งค่า:
+            <br>• การแจ้งเตือน Line <em>(หน้านี้)</em>
+            <br>• Safety Zone
+            <br>• การตรวจจับ AI
+            <br>• กล้องและวิดีโอ
+            <br>• เกี่ยวกับข้อมูล (logs / ข้อมูลระบบ)
+            <br>• เกี่ยวกับระบบ (version / ผู้พัฒนา)
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">2</div>
+          <div class="desc-text"><strong>LINE Notify Token</strong> — ช่องกรอก Token สำหรับเชื่อมต่อ LINE OA มีปุ่ม <strong>แสดง / แก้ไข</strong> เพื่อความปลอดภัย</div>
+        </li>
+        <li>
+          <div class="desc-num">3</div>
+          <div class="desc-text"><strong>ตารางกลุ่มการแจ้งเตือน</strong> — กำหนดกลุ่มผู้รับและ Cooldown ของแต่ละระดับ:
+            <br>• 🟡 <strong>WARNING</strong>: หัวหน้างาน | Cooldown 30s
+            <br>• 🟠 <strong>ALERT</strong>: Safety Officer + หัวหน้างาน | Cooldown 30s
+            <br>• 🔴 <strong>EMERGENCY</strong>: Emergency + Safety Officer + หัวหน้างาน | Cooldown 30s
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">4</div>
+          <div class="desc-text"><strong>เกณฑ์การตรวจจับ AI</strong> — Slider ปรับค่าความไว:
+            <br>• PPE Confidence threshold: <strong>0.70</strong>
+            <br>• Fall detection — frame confirmation: <strong>6 frame</strong>
+            <br>• Bbox ratio threshold: <strong>0.72</strong>
+          </div>
+        </li>
+        <li>
+          <div class="desc-num">5</div>
+          <div class="desc-text"><strong>สถานะระบบ</strong> — แสดง 🟢 "ระบบทำงานปกติ" ที่มุมล่างซ้าย ยืนยันว่า ZENTRA พร้อมใช้งาน</div>
+        </li>
+      </ul>
+      <div class="transition-box">
+        <div class="label">การเปลี่ยนหน้า</div>
+        การเปลี่ยนค่าใด ๆ จะมีผลทันทีหรือเมื่อกดบันทึก<br>
+        กดเมนูย่อยซ้าย → สลับไปยังการตั้งค่าส่วนอื่น (Zone / AI / กล้อง ฯลฯ)
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center; color:#aaa; font-size:12px; padding: 20px 0 40px;">
+  ZENTRA Safety AI System — Story Board Document | CEDT Innovation Summit 2026
+</div>
+
+</body>
+</html>

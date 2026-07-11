@@ -1,0 +1,35 @@
+# ZENTRA factory deploy — `docker compose up`.
+# Single app container runs the PPE model (ultralytics ByteTrack) in-process on
+# RTSP cameras. All inference on-premise (PDPA): no image leaves the container.
+services:
+  zentra-app:
+    build: .
+    image: zentra-app:latest
+    container_name: zentra-app
+    ports:
+      # Bound to LOOPBACK on purpose. This API has NO authentication: anyone who can
+      # reach it can read worker evidence photos (/api/history/snapshot), wipe the
+      # event log (/api/history/clear) and spawn subprocesses (/api/jobs/train).
+      # Plain "7788:7788" published all of that to every host on the factory LAN.
+      # To reach it from another machine, put an authenticating reverse proxy in
+      # front of it — do not widen this binding.
+      - "127.0.0.1:7788:7788"           # web UI + WebSocket live feed
+    environment:
+      - PPE_INFER_DEVICE=cpu            # factory GPU host → set "cuda"
+      - USE_LOCAL_MODEL=true            # use our ppe_finetuned.pt (0.698)
+      - PYTHONUTF8=1
+      - PPE_IMGSZ=640                   # lower infer res → ~2x faster on CPU (960 for GPU)
+      - INFERENCE_CONFIDENCE=0.30       # person-centric engine needs decent person recall; temporal 3-of-5 confirm suppresses false alarms
+      # Thread pinning (CRITICAL for smooth CPU inference): without this, torch
+      # oversubscribes threads under uvicorn's thread pool → detect() thrashes
+      # from 130ms to 310ms (2.4x). Pinning gives stable 7.7 fps on this box.
+      - OMP_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+      - STREAM_FPS=15                   # raw-video broadcast fps (encode ~0.6ms → cheap); smoother motion
+    volumes:
+      - ./data:/app/data               # zones.json + collected frames (persist)
+      - ./backend:/app/backend         # engine/config live-mounted (models/ inside); factory bakes it in the image instead
+      - ./server:/app/server           # API live-mounted → edit + restart, no rebuild
+      - ./pipeline:/app/pipeline       # pipeline live-mounted
+      - ./ui:/app/ui                   # UI live-mounted → edit + refresh, no rebuild
+    restart: unless-stopped

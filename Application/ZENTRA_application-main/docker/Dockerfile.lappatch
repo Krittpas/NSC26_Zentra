@@ -1,0 +1,5 @@
+# Thin patch layer: add `lap` (via lapx wheel) to the existing image without a
+# full rebuild. Installs from a local wheel so it needs NO container network.
+FROM zentra-app:latest
+COPY docker/wheels/ /tmp/wheels/
+RUN pip install --no-cache-dir --no-index --find-links=/tmp/wheels lapx && rm -rf /tmp/wheels
