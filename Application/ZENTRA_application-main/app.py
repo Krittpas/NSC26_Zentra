@@ -139,6 +139,11 @@ if __name__ == "__main__":
     window = webview.create_window(
         title="ZENTRA Safety AI System",
         url=_url,
+        # Open full-screen (kiosk-style) instead of a floating window. In
+        # full-screen there is no native title bar / X, so the in-app quit button
+        # (top-right) is the way out; F11 / toggle_fullscreen() also exits.
+        # width/height are the size the window falls back to if full-screen is left.
+        fullscreen=True,
         width=1280,
         height=800,
         min_size=(1024, 640),
