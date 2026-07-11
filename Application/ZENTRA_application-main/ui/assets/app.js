@@ -592,15 +592,41 @@ function renderTopbar() {
     + '<button class="topbar-btn" id="topbar-theme-btn" onclick="ZENTRA.toggleTheme()" title="สลับธีม">'
     + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + themeIco + '</svg>'
     + '</button>'
-    + '<button class="topbar-btn topbar-bell" title="การแจ้งเตือน">'
+    + '<button class="topbar-btn topbar-bell" onclick="ZENTRA.navigate(\'history\')" title="การแจ้งเตือน · เปิดหน้าประวัติ">'
     + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
     + '<path d="M10.268 21a2 2 0 0 0 3.464 0"/>'
     + '<path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>'
     + '<span class="topbar-badge" id="topbar-badge"></span>'
     + '</button>'
+    // Divider + quit: closes the app cleanly (with confirm). Redundant with the
+    // native window X in windowed mode, but the reachable exit in fullscreen/kiosk.
+    + '<span style="width:1px;height:20px;background:var(--border);margin:0 2px"></span>'
+    + '<button class="topbar-btn" id="topbar-quit-btn" onclick="ZENTRA.quitApp()" title="ปิดโปรแกรม">'
+    + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    + '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>'
+    + '</button>'
     + '</div>'
     + '</div>';
 }
+
+// Quit the desktop app (with confirm). The pywebview JsApi releases the camera
+// + pipeline cleanly on destroy; in a plain browser (no pywebview) there's
+// nothing to close, so tell the user to use the window controls instead.
+ZENTRA.quitApp = async function () {
+  var ok = await ZENTRA.confirm('ปิดโปรแกรม ZENTRA', {
+    danger: true, okText: 'ปิดโปรแกรม',
+  });
+  if (!ok) return;
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.close_app) {
+      window.pywebview.api.close_app();
+    } else {
+      ZENTRA.toast('โปรดปิดจากปุ่มหน้าต่างของระบบ', 'error');
+    }
+  } catch (_) {
+    ZENTRA.toast('ปิดโปรแกรมไม่สำเร็จ', 'error');
+  }
+};
 
 ZENTRA.mountSidebar = function (active) {
   var sb = document.getElementById('app-sidebar');

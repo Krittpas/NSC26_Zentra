@@ -93,6 +93,13 @@ class JsApi:
         if webview.windows:
             webview.windows[0].toggle_fullscreen()
 
+    def close_app(self):
+        """Quit from an in-app button. destroy() fires the window 'closing'
+        event, which is wired to shutdown_pipeline() — so the camera/pipeline
+        and LINE sender are released cleanly, same as clicking the native X."""
+        if webview.windows:
+            webview.windows[0].destroy()
+
 
 def shutdown_pipeline():
     """Stop the AI pipeline + background threads cleanly on window close.
