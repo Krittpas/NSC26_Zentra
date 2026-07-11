@@ -200,7 +200,21 @@ function histRenderTable() {
   var body = document.getElementById('hist-table-body');
   if (!body) return;
   if (slice.length === 0) {
-    body.innerHTML = '<div style="text-align:center;padding:48px;color:var(--text-muted);font-size:13.5px">ไม่พบเหตุการณ์ที่ตรงกับเงื่อนไข</div>';
+    // Distinguish "nothing recorded yet" (fresh install / cleared) from
+    // "filters excluded everything" — they need different guidance.
+    if (_histEvents.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:52px 24px;color:var(--text-muted)">'
+        + '<svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:14px;opacity:.35"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>'
+        + '<div style="font-size:14.5px;font-weight:600;color:var(--text-sub);margin-bottom:4px">ยังไม่มีเหตุการณ์บันทึกไว้</div>'
+        + '<div style="font-size:12.5px;color:var(--text-muted)">เหตุการณ์ความปลอดภัยจะปรากฏที่นี่โดยอัตโนมัติเมื่อระบบตรวจพบ</div>'
+        + '</div>';
+    } else {
+      body.innerHTML = '<div style="text-align:center;padding:52px 24px;color:var(--text-muted)">'
+        + '<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:14px;opacity:.35"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>'
+        + '<div style="font-size:14px;font-weight:600;color:var(--text-sub);margin-bottom:4px">ไม่พบเหตุการณ์ที่ตรงกับเงื่อนไข</div>'
+        + '<div style="font-size:12.5px;color:var(--text-muted)">ลองล้างคำค้นหา ตัวกรอง หรือเลือกช่วงวันอื่น</div>'
+        + '</div>';
+    }
     return;
   }
   body.innerHTML = slice.map(function(e) {
@@ -289,18 +303,40 @@ function histRangeQuery() {
   return day ? ('?day=' + day) : '';
 }
 
+// Block an export/report when there is provably nothing to export, so the user
+// never gets an empty CSV/PDF or an empty LINE summary. We can only be sure
+// client-side for the loaded day/all view; a custom from–to range is bounded on
+// the server (which renders "no events" gracefully), so we let that through.
+function histExportEmptyGuard() {
+  var f = (document.getElementById('hist-from') || {}).value;
+  var t = (document.getElementById('hist-to')   || {}).value;
+  if (!(f && t) && _histEvents.length === 0) {
+    ZENTRA.toast('ยังไม่มีเหตุการณ์ให้ส่งออกในช่วงนี้', 'error');
+    return true;   // empty → caller should abort
+  }
+  return false;
+}
+
 // Server-side CSV (real type/level, all rows) for the chosen range/day
 function histExport() {
+  if (histExportEmptyGuard()) return;
   window.location = '/api/history/export.csv' + histRangeQuery();
 }
 
 // Standards-based PDF report for the chosen range/day
 function histDownloadPdf() {
+  if (histExportEmptyGuard()) return;
   window.location = '/api/report/daily.pdf' + histRangeQuery();
 }
 
 // Push a daily safety summary to the configured LINE groups (text only).
 async function histSendLine() {
+  // sendLine always uses the loaded day/all view (never the from–to range), so
+  // guard directly on what's loaded — don't push an empty summary.
+  if (_histEvents.length === 0) {
+    ZENTRA.toast('ยังไม่มีเหตุการณ์ให้ส่งเข้า LINE ในช่วงนี้', 'error');
+    return;
+  }
   var day = histCurrentDay();
   var body = day ? { day: day } : {};
   try {

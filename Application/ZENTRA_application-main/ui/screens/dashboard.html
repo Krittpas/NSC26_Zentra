@@ -257,7 +257,16 @@ function dashLoadScores() {
 
 function loadDashHourly() {
   var canvas = document.getElementById('dash-hourly');
-  if (!canvas || typeof Chart === 'undefined') return;
+  if (!canvas) return;
+  // Chart.js failed to load (e.g. offline) — show a clear fallback instead of an
+  // empty box, so the panel never looks broken.
+  if (typeof Chart === 'undefined') {
+    var wrap = canvas.parentElement;
+    if (wrap) wrap.innerHTML = '<div style="height:100%;min-height:48px;display:flex;align-items:center;'
+      + 'justify-content:center;text-align:center;color:var(--text-muted);font-size:11.5px;padding:6px">'
+      + 'ไม่สามารถโหลดกราฟกิจกรรมได้</div>';
+    return;
+  }
   fetch('/api/history/hourly').then(function(r) { return r.json(); }).then(function(data) {
     var labels = [];
     for (var h = 0; h < 24; h++) labels.push(String(h).padStart(2, '0'));
