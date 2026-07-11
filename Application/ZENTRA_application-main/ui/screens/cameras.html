@@ -177,9 +177,9 @@ var _fsTimer  = null;
 var _roleCamIdx = 0;
 
 var _rolesCfg = [
-  { id: 'ppe',    label: 'ตรวจจับ PPE',          desc: 'ตรวจหมวกนิรภัย แว่นตานิรภัย เสื้อกั๊ก ถุงมือ รองเท้าเซฟตี้', color: 'var(--orange)', icon: '🦺', status: 'active' },
-  { id: 'zone',   label: 'เฝ้าพื้นที่อันตราย',    desc: 'ตรวจบุคคลเข้าพื้นที่อันตราย',         color: 'var(--accent)', icon: '📍', status: 'active' },
-  { id: 'fall',   label: 'ตรวจจับการล้ม',        desc: 'ตรวจการล้มและแจ้งเตือนฉุกเฉิน', color: 'var(--red)', icon: '🚨', status: 'active' },
+  { id: 'ppe',    label: 'ตรวจจับ PPE',          desc: 'ตรวจหมวกนิรภัย แว่นตานิรภัย เสื้อกั๊ก ถุงมือ รองเท้าเซฟตี้', color: 'var(--orange)', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M2 18a1 1 0 0 0 1 1h18a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1z"/><path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/><path d="M4 15v-3a6 6 0 0 1 6-6"/><path d="M14 6a6 6 0 0 1 6 6v3"/></svg>', status: 'active' },
+  { id: 'zone',   label: 'เฝ้าพื้นที่อันตราย',    desc: 'ตรวจบุคคลเข้าพื้นที่อันตราย',         color: 'var(--accent)', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>', status: 'active' },
+  { id: 'fall',   label: 'ตรวจจับการล้ม',        desc: 'ตรวจการล้มและแจ้งเตือนฉุกเฉิน', color: 'var(--red)', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M5 21h14"/><path d="M4 11h1"/><path d="M19 11h1"/><path d="M15.5 5.5 16 5"/><path d="M8.5 5.5 8 5"/></svg>', status: 'active' },
 ];
 
 function camRoleBadge(roleId) {

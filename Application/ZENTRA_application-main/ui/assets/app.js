@@ -56,6 +56,13 @@ const ZENTRA = {
       const html      = await res.text();
       const container = document.getElementById('app');
       container.innerHTML = html;
+      // Subtle fade-in on every navigation so screens ease in instead of
+      // hard-cutting. Opacity only (no transform) so it never becomes a
+      // containing block for a screen's fixed modals/toasts. Re-trigger the
+      // animation by removing the class + forcing a reflow.
+      container.classList.remove('zt-screen-enter');
+      void container.offsetWidth;
+      container.classList.add('zt-screen-enter');
       ZENTRA._currentScreen = screenId;
 
       // Left sidebar for main screens; full-screen for splash/source
@@ -574,11 +581,11 @@ ZENTRA.icon = function (name) {
 
 function renderSidebar(active) {
   var mainItems = [
-    { id: 'dashboard',   ico: 'dashboard', label: 'Dashboard'   },
-    { id: 'cameras',     ico: 'cameras',   label: 'Cameras'     },
+    { id: 'dashboard',   ico: 'dashboard', label: 'แดชบอร์ด'    },
+    { id: 'cameras',     ico: 'cameras',   label: 'กล้อง'       },
     { id: 'zone_editor', ico: 'zone',      label: 'แก้ไขพื้นที่' },
     { id: 'history',     ico: 'history',   label: 'ประวัติ'     },
-    { id: 'settings',    ico: 'settings',  label: 'Settings'    },
+    { id: 'settings',    ico: 'settings',  label: 'ตั้งค่า'      },
   ];
   var nav = mainItems.map(function(it) {
     return '<button class="sb-item' + (it.id === active ? ' active' : '') + '"'

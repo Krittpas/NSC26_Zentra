@@ -1260,6 +1260,27 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
   display: none;
 }
 
+/* ─── Splash entrance polish (staggered fade-up + logo glow) ─────── */
+@keyframes splashPop {
+  0%   { opacity: 0; transform: scale(.82) translateY(6px); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes splashGlow {
+  0%, 100% { box-shadow: var(--shadow-md), 0 0 0 0 rgba(59,130,246,.30); }
+  50%      { box-shadow: var(--shadow-md), 0 0 30px 5px rgba(59,130,246,.42); }
+}
+@keyframes splashFadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.splash-logo-wrap  { animation: splashPop .6s cubic-bezier(.2,.7,.2,1) both; }
+.splash-mark       { animation: splashGlow 2.6s ease-in-out 0.6s infinite; }
+.splash-title      { animation: splashFadeUp .55s ease-out .18s both; }
+.splash-subtitle   { animation: splashFadeUp .55s ease-out .28s both; }
+.splash-version    { animation: splashFadeUp .55s ease-out .38s both; }
+.splash-progress-wrap { animation: splashFadeUp .55s ease-out .48s both; }
+
 /* ══════════════════════════════════════════════════
    SOURCE SELECTION
    ══════════════════════════════════════════════════ */
@@ -1379,6 +1400,47 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
 /* ─── Toast / event card animations ────────────── */
 @keyframes toastIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes recPulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+/* ─── Screen enter transition (SPA navigate) ─────── */
+@keyframes ztScreenIn { from { opacity: 0; } to { opacity: 1; } }
+.zt-screen-enter { animation: ztScreenIn .16s ease-out; }
+
+/* ══════════════════════════════════════════════════
+   INTERACTION POLISH  (focus ring + card hover)
+   ══════════════════════════════════════════════════ */
+/* L3 — visible keyboard-focus ring. :focus-visible only shows for keyboard
+   users (Tab), never on mouse click, so it adds accessibility without changing
+   the mouse look. */
+.btn:focus-visible,
+.topbar-btn:focus-visible,
+.sb-item:focus-visible,
+.nav-tab:focus-visible,
+.settings-menu-item:focus-visible,
+.zt-btn:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 2px;
+}
+
+/* L1 — subtle hover lift for the reusable card components (dashboard/history/
+   settings surfaces built from these classes). Inline-styled one-off cards keep
+   their current look. */
+.card,
+.stat-card,
+.module-status-list,
+.alert-count-box {
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.card:hover,
+.stat-card:hover,
+.alert-count-box:hover {
+  border-color: var(--border-mid);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
 
 /* ══════════════════════════════════════════════════
    UTILITY
