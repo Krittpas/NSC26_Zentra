@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 import config as cfg
 from utils.detect_track import Detector, PersonDetector
 from utils.ppe_association import associate, violations_of, CATEGORIES
-from utils.temporal import TrackWindowConfirmer, CooldownGate
+from utils.temporal import TrackWindowConfirmer, TimeWindowConfirmer, CooldownGate
 from utils import zone_geometry
 
 GREEN, RED, CYAN = (0, 210, 0), (0, 0, 220), (255, 190, 0)
@@ -150,7 +150,8 @@ class PPEEngine:
         self.detector = self.ppe_detector or self.person_detector
         self.pconf = TrackWindowConfirmer(cfg.PPE_CONFIRM_FRAMES, cfg.PPE_CONFIRM_WINDOW)
         self.pcool = CooldownGate(cfg.VIOLATION_COOLDOWN_SECONDS)
-        self.zconf = TrackWindowConfirmer(cfg.ZONE_CONFIRM_FRAMES, cfg.ZONE_CONFIRM_WINDOW)
+        self.zconf = TimeWindowConfirmer(cfg.ZONE_CONFIRM_WINDOW_SEC,
+                                         cfg.ZONE_CONFIRM_MIN_RATIO, cfg.ZONE_CONFIRM_MIN_HITS)
         self.zcool = CooldownGate(cfg.ZONE_COOLDOWN_SECONDS)
         self._zones_path = zones_path
         self._camera_id = camera_id            # only load zones for this camera (None = all)
@@ -227,7 +228,8 @@ class PPEEngine:
         read per-call from cfg inside detect_track, so it needs nothing here.)"""
         self.pconf = TrackWindowConfirmer(cfg.PPE_CONFIRM_FRAMES, cfg.PPE_CONFIRM_WINDOW)
         self.pcool = CooldownGate(cfg.VIOLATION_COOLDOWN_SECONDS)
-        self.zconf = TrackWindowConfirmer(cfg.ZONE_CONFIRM_FRAMES, cfg.ZONE_CONFIRM_WINDOW)
+        self.zconf = TimeWindowConfirmer(cfg.ZONE_CONFIRM_WINDOW_SEC,
+                                         cfg.ZONE_CONFIRM_MIN_RATIO, cfg.ZONE_CONFIRM_MIN_HITS)
         self.zcool = CooldownGate(cfg.ZONE_COOLDOWN_SECONDS)
         self.fconf = TrackWindowConfirmer(cfg.FALL_CONFIRM_FRAMES, cfg.FALL_CONFIRM_WINDOW)
         self.fcool = CooldownGate(cfg.FALL_COOLDOWN_SECONDS)

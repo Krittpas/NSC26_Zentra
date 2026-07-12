@@ -123,12 +123,6 @@
           <span id="camera-label" style="background:rgba(0,0,0,.58);backdrop-filter:blur(4px);padding:5px 10px;border-radius:7px;color:#fff;font-size:11.5px;font-weight:500">กล้อง #1</span>
         </div>
         <span id="video-clock" style="position:absolute;top:12px;right:14px;background:rgba(0,0,0,.58);backdrop-filter:blur(4px);padding:5px 10px;border-radius:7px;color:rgba(255,255,255,.85);font-size:11px;font-variant-numeric:tabular-nums;z-index:2">--:--:--</span>
-        <!-- Emergency banner -->
-        <div id="emergency-banner" class="hidden" role="alert" aria-live="assertive" style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(239,68,68,.9);backdrop-filter:blur(4px);padding:10px 18px;border-radius:10px;display:flex;align-items:center;gap:10px;z-index:4;min-width:280px">
-          <span style="width:10px;height:10px;border-radius:50%;background:#fff;animation:recPulse 1s infinite;flex-shrink:0"></span>
-          <div style="flex:1"><div style="color:#fff;font-weight:600;font-size:13px" class="emergency-msg">ตรวจพบเหตุฉุกเฉิน</div><div style="color:rgba(255,255,255,.8);font-size:11px" class="emergency-meta">--:--:--</div></div>
-          <button onclick="ZENTRA.navigate('history')" style="color:rgba(255,255,255,.9);background:rgba(255,255,255,.2);border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer">ดู</button>
-        </div>
         <!-- Toast container -->
         <div id="toast-container" style="position:absolute;left:16px;bottom:16px;max-width:340px;z-index:5;display:flex;flex-direction:column-reverse;gap:8px"></div>
       </div>
@@ -164,8 +158,6 @@
       <div style="display:flex;align-items:center;justify-content:space-between;flex-shrink:0;margin-bottom:4px">
         <span style="font-size:13.5px;font-weight:600;color:var(--text)">การแจ้งเตือนล่าสุด</span>
         <div style="display:flex;align-items:center;gap:12px">
-          <button onclick="ZENTRA.navigate('zone_editor')" style="border:none;background:transparent;color:var(--text-sub);font-family:var(--font);font-size:12.5px;font-weight:500;cursor:pointer">แก้ไขโซน/กฎ</button>
-          <button id="stop-btn" onclick="stopPipeline()" style="border:1px solid var(--red-dim);background:transparent;color:var(--red);font-family:var(--font);font-size:12px;font-weight:500;cursor:pointer;border-radius:7px;padding:5px 12px">หยุด / เปลี่ยนแหล่งภาพ</button>
           <button onclick="ZENTRA.navigate('history')" style="border:none;background:transparent;color:var(--accent);font-family:var(--font);font-size:12.5px;font-weight:600;cursor:pointer">ดูทั้งหมด →</button>
         </div>
       </div>
@@ -319,11 +311,9 @@ function init_dashboard() {
   ZENTRA._updateModuleStatus();
   ZENTRA._updateKPIs();
   ZENTRA._updateCameraState();
-  // Detection removed — do not re-show a stale emergency banner on load.
-  // Live emergencies (when modules return) still call _showEmergencyBanner directly.
+  // The on-video emergency banner was removed — live emergencies still surface as
+  // a toast (bottom-left) via _toastHook, and in the Recent Alerts list.
   ZENTRA.state.last_emergency = null;
-  var _eb = document.getElementById('emergency-banner');
-  if (_eb) _eb.classList.add('hidden');
 
   // Camera status indicator
   function updateCamDot() {

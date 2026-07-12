@@ -350,8 +350,17 @@ ZONE_POLYGON_FILE = str(DATA_DIR / "zones.json")
 MAX_ZONES         = 10
 ZONE_USE_FOOT_POINT = os.getenv("ZONE_USE_FOOT_POINT", "true").lower() == "true"  # test feet, not bbox centre
 ZONE_TRACK_MIN_HITS = int(os.getenv("ZONE_TRACK_MIN_HITS", "3"))   # ignore unstable tracks
-ZONE_CONFIRM_FRAMES = int(os.getenv("ZONE_CONFIRM_FRAMES", "3"))   # need N inside-frames per track
-ZONE_CONFIRM_WINDOW = int(os.getenv("ZONE_CONFIRM_WINDOW", "5"))   # ...within the last M frames (per track)
+ZONE_CONFIRM_FRAMES = int(os.getenv("ZONE_CONFIRM_FRAMES", "3"))   # (legacy frame-count — no longer drives zone)
+ZONE_CONFIRM_WINDOW = int(os.getenv("ZONE_CONFIRM_WINDOW", "5"))   # (legacy frame-count — kept for back-compat)
+# FPS-INDEPENDENT zone confirm (time-based, replaces the frame-count above for zone):
+# confirmed when the foot point was inside for >= MIN_RATIO of the last WINDOW_SEC
+# seconds, with an absolute floor of MIN_HITS inside observations. A fixed N-of-M
+# frame window's time span swings with FPS (5 frames = 0.17s @30fps vs ~1.3s @4fps),
+# so a fast walk-through at low FPS could miss 3-of-5. Seconds behave the same at any
+# FPS. Lower WINDOW_SEC / MIN_RATIO = more sensitive (catches quick crossings, more FP).
+ZONE_CONFIRM_WINDOW_SEC = float(os.getenv("ZONE_CONFIRM_WINDOW_SEC", "0.8"))
+ZONE_CONFIRM_MIN_RATIO  = float(os.getenv("ZONE_CONFIRM_MIN_RATIO",  "0.5"))
+ZONE_CONFIRM_MIN_HITS   = int(os.getenv("ZONE_CONFIRM_MIN_HITS",   "2"))
 
 # ================================================================
 # PPE — accuracy / debounce
