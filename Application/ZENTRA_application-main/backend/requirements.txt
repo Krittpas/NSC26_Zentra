@@ -8,13 +8,19 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
 
-# ── Roboflow Inference ───────────────────────────────────────
-inference-sdk>=0.9.0      # HTTP client → local Docker inference server (port 9001)
-# inference>=0.18.0       # Optional: run the server via pip instead of Docker
+# ── Thai overlay text shaping ────────────────────────────────
+# Pillow has no complex-script shaping, so Thai stacked vowel + tone mark (e.g.
+# "พื้นที่") render misplaced on the video overlay. harfbuzz shapes and freetype
+# rasterises so it renders correctly (utils/ppe_engine._shape_text_img). Optional:
+# if absent the overlay falls back to plain Pillow (ASCII fine, Thai unshaped).
+uharfbuzz>=0.39.0
+freetype-py>=2.4.0
 
-# ── AI / ML ──────────────────────────────────────────────────
-ultralytics>=8.1.0        # YOLOv8 training + inference
-mediapipe==0.10.14        # Pose estimation (33 kpts) — pinned: ships mp.solutions
+# ── AI / ML (all inference runs IN-PROCESS via ultralytics — no Docker server) ──
+ultralytics>=8.1.0        # YOLO person/PPE detect + ByteTrack + pose (in-process)
+# mediapipe: ONLY needed if FALL_POSE_BACKEND=mediapipe (default is "yolo", which
+# uses yolo11n-pose and needs nothing here). Pinned pair — newer protobuf breaks it.
+mediapipe==0.10.14        # optional pose backend (33 kpts) — pinned: ships mp.solutions
 protobuf>=4.25.3,<5       # REQUIRED by mediapipe 0.10.14 (protobuf 5+/7 breaks it)
 
 # ── Training ─────────────────────────────────────────────────

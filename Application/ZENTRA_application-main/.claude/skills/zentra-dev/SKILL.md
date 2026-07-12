@@ -1,248 +1,161 @@
 ---
 name: zentra-dev
 description: >
-  Use when running, debugging, or extending the ZENTRA Safety AI system
-  (the PyWebView + FastAPI desktop app in c:\ZENTRA\ZENTRA_application that
-  wraps the AI backend in c:\ZENTRA\ZENTRA). Covers launching it, the Docker
-  inference server that PPE/Zone need, the mediapipe/protobuf version trap,
-  the Edge WebView2 gotchas that cause blank/stuck screens, the SPA router
-  contract, the Pipeline integration, the in-app data-collection + training
-  workflow, and zone-detection behaviour. Read this before touching app.py,
-  server/*, pipeline/*, ui/*, or the backend modules/training so you don't
-  re-discover the same traps.
+  Use when running, debugging, or extending the ZENTRA Safety AI system — the
+  PyWebView + FastAPI desktop app that wraps the AI engine, all in ONE repo
+  (Application/ZENTRA_application-main). Covers launching it, the in-process
+  ultralytics engine (PPE / Safety Zone / Fall — NO Docker inference server),
+  the missing-PPE-model behaviour, the mediapipe/protobuf trap, the Edge WebView2
+  gotchas that cause blank/stuck screens, the SPA router contract, the Pipeline
+  integration, per-camera roles, and the in-app training workflow. Read this
+  before touching app.py, server/*, pipeline/*, ui/*, or backend/utils · training.
 ---
 
 # ZENTRA Desktop Application — Developer Skill
 
-A native Windows desktop app that wraps the **existing, unchanged** ZENTRA
-AI backend (`c:\ZENTRA\ZENTRA`) in a 6-screen dark-themed GUI.
-
-- **App layer** (this repo): `c:\ZENTRA\ZENTRA_application` — repo `ZENTRA_application`
-- **AI backend** (separate): `c:\ZENTRA\ZENTRA` — PPE / Safety Zone / Fall modules
+A native desktop app (PyWebView + FastAPI) with a 6-screen dark web UI, wrapping
+the AI engine. **Single repo:** `app.py`, `server/`, `pipeline/`, `ui/`, `data/`,
+and `backend/` (the AI engine) all live under `Application/ZENTRA_application-main/`.
+There is **no separate backend repo** and **no Docker inference server** — every
+model runs in-process via ultralytics (this replaced an older Roboflow `:9001`
+architecture; nothing listens on 9001).
 
 ## Run it
 
 ```
-cd c:\ZENTRA\ZENTRA_application
-.\run_zentra.ps1          # or double-click run_zentra.bat
+cd Application/ZENTRA_application-main
+python app.py                 # → http://127.0.0.1:7788/  + PyWebView window
 ```
+`app.py` forces UTF-8 stdout (the engine prints emoji/Thai → would crash a cp1252
+console), starts **uvicorn in a daemon thread** (`127.0.0.1:7788`), waits ~2s,
+then opens a **fullscreen PyWebView** window. Flow: Splash → Source → Dashboard →
+(Cameras / Zone Editor / History / Settings). `run_zentra.ps1` just launches the
+app (no Docker). It runs **without** a LINE token (events still show in-app).
 
-`run_zentra.ps1` ensures the Docker inference server is up on :9001 (starts
-Docker Desktop + the container if needed) **then** runs `python app.py`.
-Plain `python app.py` also works if the inference server is already running.
+## The AI engine (all in-process via ultralytics)
 
-`app.py` forces UTF-8 stdout (backend prints emoji/Thai → would crash a
-cp1252 console), starts **uvicorn in a daemon thread** (`127.0.0.1:7788`),
-waits ~2s, then opens a **PyWebView** window (Edge WebView2). Flow:
-Splash → Source Selection → Live Dashboard → (Zone Editor / History / Settings).
+| Module | How | Model | Alert level |
+|--------|-----|-------|-------------|
+| **PPE** | person → match PPE items by box containment | `ppe_finetuned.pt` (items) | `warning` |
+| **Safety Zone** | foot-point in polygon, 3-of-5 confirm, rising-edge | (geometry — no model) | `alert` |
+| **Fall** | pose → 30-frame skeleton → TFLite Transformer + rule layer | `yolo11n-pose.pt` + `.tflite` | `emergency` |
 
-It runs **without** a LINE token (events still show in-app). It runs without
-the inference server too, but then **PPE + Zone produce nothing** (only
-MediaPipe pose works) — see next section.
+- **Person detection + tracking is decoupled from PPE:** a COCO `yolo11s.pt` finds
+  + ByteTrack-tracks people (high recall, stable ids); the PPE fine-tune only
+  classifies items. Everything (PPE/Zone/Fall) stands on the person box.
+- **Fall pose backend defaults to `yolo`** (`yolo11n-pose`, multi-person, better on
+  distant workers). MediaPipe is an *optional* backend (`FALL_POSE_BACKEND=mediapipe`).
+- Models live in `backend/models/` (**git-ignored**). `yolo11s`/`yolo11n-pose`
+  auto-download from ultralytics; `ppe_finetuned.pt` is yours and cannot.
+- **Missing `ppe_finetuned.pt` → PPE pauses (status `off`), it does NOT crash the
+  engine** — person/zone/fall keep running (utils/ppe_engine `__init__`). A totally
+  failed engine falls back to passthrough and reports `engine_error` loudly, because
+  clean video with no boxes must never read as "everyone is compliant".
 
-## AI runtime — what each module needs
+## Per-camera roles (common gotcha)
 
-| Module | Tech | Needs |
-|--------|------|-------|
-| PPE Detection | YOLO via Roboflow | inference server on `localhost:9001` |
-| Safety Zone | ByteTrack + polygon | inference server (uses the `person` class from PPE preds) |
-| Heat-Stroke / Fall | MediaPipe Pose (+ Roboflow fall fallback) | `mediapipe` (local, no server) |
+`data/settings.json` → `cameras.<id>.roles` gates which modules run/draw for that
+camera, e.g. `{"cam0": {"roles": ["zone","fall"], "ppe_items": ["helmet"]}}`.
+- Roles read at pipeline **start** (and hot-applied on Settings save).
+- **If roles don't include a module that draws person boxes (zone/fall/ppe-with-
+  model), no boxes appear** — a camera set to `["ppe"]` with no PPE model shows
+  nothing. `roles` absent/`null` = all modules on.
 
-**Inference server (Docker):**
-```
-docker run -d --name zentra-inference --restart unless-stopped -p 9001:9001 \
-  roboflow/roboflow-inference-server-cpu:latest
-```
-Verify: `curl http://localhost:9001/` → HTML 200. The client + model IDs +
-API key all default correctly in `config.py` (`ppe-cpxsz/2`,
-`fall-detection-ovjqo/5`, server `http://localhost:9001`). GPU image
-(`...-gpu`, `--gpus all`) is faster but needs WSL2 GPU set up; CPU image is
-the reliable default.
+## ⚠️ mediapipe / protobuf trap (only if FALL_POSE_BACKEND=mediapipe)
 
-**⚠️ mediapipe / protobuf version trap (cost real time):** MediaPipe pose
-needs `mediapipe==0.10.14` **and** `protobuf>=4.25.3,<5`. Symptoms:
-- `module 'mediapipe' has no attribute 'solutions'` → broken/incomplete
-  mediapipe wheel → `pip install --force-reinstall --no-deps mediapipe==0.10.14`
-- `'FieldDescriptor' object has no attribute 'label'` → protobuf too new →
-  `pip install "protobuf>=4.25.3,<5"`
-These pins are in the backend `requirements.txt`. When MediaPipe is
-unavailable the code falls back to the Roboflow fall model (still works).
+Needs `mediapipe==0.10.14` **and** `protobuf>=4.25.3,<5`.
+- `module 'mediapipe' has no attribute 'solutions'` → `pip install --force-reinstall --no-deps mediapipe==0.10.14`
+- `'FieldDescriptor' object has no attribute 'label'` → `pip install "protobuf>=4.25.3,<5"`
+
+The default `yolo` backend needs none of this.
+
+## ⚠️ Edge WebView2 traps (these cost real debugging time — don't repeat)
+
+1. **`innerHTML = html` does NOT execute `<script>` tags.** The SPA router injects
+   screen HTML; `app.js navigate()` re-creates each `<script>` as a fresh element so
+   it runs in **global** scope (so `window['init_<screen>']` is found). `eval()`
+   would define it locally → screen looks stuck.
+2. **Top-level `let`/`const` in screen scripts → use `var`.** Re-navigating re-runs
+   the script; a second top-level `let X` throws `already declared`. `var` is fine.
+3. **External CDN scripts must be awaited.** `navigate()` awaits a `<script src>`
+   `onload` (tracked via `data-cdn`) before calling `init_*` (e.g. Chart.js).
+4. **SSE (`EventSource`) is unreliable in WebView2** — buffers, may never fire.
+   Use WebSocket or polling. (Splash uses a local timer, not SSE.)
+
+## SPA router contract (`ui/assets/app.js`)
+
+- `ZENTRA.navigate(id)` fetches `/ui/screens/<id>.html`, injects it, re-executes
+  scripts, then calls `window['init_<id>']()`. Main screens get the left sidebar.
+- Global state on `ZENTRA.state` (`pipeline`, `modules`, `alerts`, `camera`,
+  `recentAlarms`, …). WS messages: `{type:'frame', data:<b64 jpeg>}` → `#video-feed`;
+  `{type:'event', event:'status'|'alert', ...}` → dots / counters / banners.
+- If a token is set (`ZENTRA_API_TOKEN`), app.js attaches it to every fetch + WS.
 
 ## Architecture
 
 ```
-app.py
-├─ daemon thread: uvicorn → server/api.py (FastAPI)
-└─ main thread:   PyWebView window → http://127.0.0.1:7788/
+app.py ── daemon thread: uvicorn → server/api.py (FastAPI)
+       └─ main thread:  PyWebView fullscreen window → 127.0.0.1:7788
 
-server/api.py (FastAPI)
-├─ @startup: build Pipeline(), wire on_alert → WS broadcast + event history,
-│            start FrameBroadcaster (frames → WS @10fps)
-├─ REST: /api/status /api/pipeline/{start,stop} /api/zones(CRUD)
-│        /api/settings /api/frame/snapshot /api/history/*
-└─ WS  : /ws/stream  (frames + events, multiplexed by msg.type)
+server/api.py ── @lifespan: build Pipeline(), wire on_alert → store + WS + LINE push,
+  │             start FrameBroadcaster (frames → WS), periodic PDPA retention purge
+  ├─ REST: /api/status · /api/pipeline/{start,stop} · /api/zones · /api/settings
+  │        /api/frame/snapshot · /api/history/* · /api/report/* · /api/jobs/*
+  └─ WS:   /ws/stream (frames + events, multiplexed by msg.type)
 
-pipeline/pipeline.py — Pipeline class (wraps the backend's main.py loop)
-├─ start(src_cfg) / stop() / is_running()
-├─ _process_loop (daemon): read → infer(worker) → annotate → store frame
-│   passes window_title="" to modules so cv2.imshow() is skipped
-├─ get_latest_frame() / get_snapshot() / get_uptime()
-├─ reload_zones() / apply_settings()
-└─ monkey-patches send_line_notify in ALL module namespaces → on_alert cb
-
-pipeline/frame_broadcaster.py — daemon: latest frame → resize → JPEG →
-                                base64 → manager.broadcast() via the loop
+pipeline/pipeline.py — decoupled loops: process loop (display @ camera fps, draws
+  latest boxes) · detect worker (heavy inference on newest frame) · fall loop
+  (fixed cadence FALL_LOOP_FPS). Builds PPEEngine; falls back to passthrough on
+  failure. FrameBroadcaster: latest frame → JPEG → base64 → WS.
 ```
-
-## ⚠️ Edge WebView2 traps (these cost real debugging time — don't repeat)
-
-1. **`element.innerHTML = html` does NOT execute `<script>` tags.**
-   The SPA router (`ZENTRA.navigate`) injects screen HTML, so each screen's
-   `init_<screen>()` would never run. Fix already in `app.js`: after setting
-   innerHTML, **re-create** every `<script>` as a fresh element and append it
-   so the browser executes it.
-
-2. **Use script-element injection, NOT `eval()`, for inline scripts.**
-   Direct `eval(text)` runs in the *local* scope of `navigate()`, so
-   `function init_x(){}` is defined locally and `window['init_x']` stays
-   undefined → screen looks stuck. A re-created `<script>` element executes in
-   **global** scope, which is what the router needs.
-
-3. **External CDN scripts must be awaited.** Chart.js (history page) is loaded
-   by appending a `<script src>` to `<head>`; `navigate()` awaits its `onload`
-   before calling `init_history()`, else `Chart` is undefined. Loaded once,
-   tracked via `data-cdn` attribute.
-
-4. **Top-level `let`/`const` in screen scripts → use `var`.** Classic scripts
-   share one global lexical environment. Re-navigating to a screen re-runs its
-   script; a second top-level `let X`/`const X` throws
-   `SyntaxError: already declared`, killing that screen. `var` redeclaration is
-   allowed. (Variables *inside* `init_*()` functions are fine.)
-
-5. **SSE (`EventSource`) is unreliable inside WebView2** — it buffers and may
-   never fire `onmessage`. The splash progress bar was switched from an SSE
-   stream to a local `setTimeout` animation. Avoid SSE for anything the UI
-   depends on; prefer WebSocket or polling.
-
-## SPA router contract (`ui/assets/app.js`)
-
-- `ZENTRA.navigate(screenId)` fetches `/ui/screens/<id>.html`, injects it,
-  re-executes scripts, then calls `window['init_<id>']()`.
-- Every screen file is an HTML fragment + a `<script>` that defines
-  `function init_<id>() { ... }`. Main screens call
-  `renderNavbar('<id>')` into `#navbar-mount`.
-- Global state lives on `ZENTRA.state` (`pipeline`, `modules`, `alerts`,
-  `uptime`, `last_emergency`, `camera_label`).
-- WebSocket messages: `{type:'frame', data:<base64 jpeg>}` updates
-  `#video-feed`; `{type:'event', ...}` updates module dots / alert counters /
-  emergency banner.
-
-## Pipeline integration rules
-
-- **Never edit the AI backend's logic.** The only allowed change is the
-  `if window_title:` guard before `cv2.imshow()` in `modules/ppe.py` and
-  `modules/safety_zone.py` (so the headless pipeline doesn't pop OpenCV
-  windows from a background thread).
-- The pipeline mirrors `main.py`'s threading model (`FrameReader`,
-  `InferenceWorker`, process loop) but stores the annotated frame in
-  `self._latest_frame` instead of `cv2.imshow()`.
-- **asyncio/threading bridge:** the FrameBroadcaster and the alert callback
-  run on threads but must talk to async WebSockets — they use
-  `asyncio.run_coroutine_threadsafe(manager.broadcast(...), _loop)` where
-  `_loop` is captured in the FastAPI `@startup` handler.
-- **Alerts:** `send_line_notify` is monkey-patched in every module namespace
-  (`ppe`, `safety_zone`, `heat_stroke`, and `alerts.line_notify`) because each
-  module did `from alerts.line_notify import send_line_notify` (binds a local
-  name). Patch must hit all of them or some alerts won't reach the UI.
 
 ## Data contracts
 
-- `data/zones.json`: list of `{id, name, color, points:[[x,y],...], enabled}`.
-  Points are **raw pixel coords** at camera resolution. The backend's
-  `safety_zone._load_zones()` reads `points`/`name` and ignores the rest, so
-  the format is compatible. After any zone CRUD, the API calls
-  `pipeline.reload_zones()` → `safety_zone._load_zones()` (no restart).
-- `data/settings.json`: merged over `SETTINGS_DEFAULTS` in `api.py`. Saving
-  calls `pipeline.apply_settings()` to push values into `config` at runtime.
+- **`data/zones.json`**: `[{id, name, color, points:[[x,y]…], type:"danger"|"exclusion",
+  camera_id, enabled}]`. **Points are NORMALIZED 0–1** (scaled to the frame at
+  runtime) — this fixes the editor-canvas ↔ camera-frame size mismatch. After any
+  zone CRUD the API calls `pipeline.reload_zones()` (no restart).
+- **`data/settings.json`**: merged over `SETTINGS_DEFAULTS` in `api.py`; saving calls
+  `pipeline.apply_settings()` to push values into `config` + engine at runtime. The
+  LINE channel token is redacted on GET and only overwritten when non-empty on POST.
 
 ## Zone detection behaviour (common confusion)
 
-- Zone intrusion fires on a detected **`person`** whose **bbox centre** is
-  inside the polygon — NOT on motion. Waving a hand ≠ a person; the whole
-  body/torso must be visible and its centre inside the zone.
-- The Zone Editor draws on a **live camera snapshot** (`/api/frame/snapshot`).
-  If the pipeline isn't running it returns a 1×1 dark pixel → the editor now
-  checks `/api/status`, shows a "connect a camera first" overlay, and retries
-  the snapshot up to 10×. **You must connect a camera (see video on the
-  Dashboard) before the editor shows an image.**
-- Coordinates are consistent because the snapshot, inference frame, and zone
-  points are all in the same raw camera resolution, and the webcam flip is
-  applied before both inference and annotation.
-- Verified on-device: snapshot returns a real JPEG and intrusion counts rise
-  as a person enters — so a "blank editor" or "no effect" almost always means
-  the pipeline isn't running / no person detected, not a code bug.
+- Fires on a detected **person** whose **foot point** (bottom-center of bbox) is in
+  the polygon — NOT on motion; a hand/object isn't a person.
+- 3-of-5 temporal confirm + **rising-edge** alert: a fresh entry (outside→inside)
+  alerts immediately, a continuous stay re-alerts every `ZONE_COOLDOWN_SECONDS`.
+- The Zone Editor draws on a live snapshot (`/api/frame/snapshot`) — **connect a
+  camera first**, or it shows a dark pixel.
 
-## Training workflow (accuracy) + in-app jobs
+## Thai overlay text
 
-Goal: fine-tune on **your own footage with corrected labels** — that, not
-epoch count, is what raises accuracy. Default models are public Roboflow
-models, untuned for the site.
+On-frame labels (zone names, PPE status, "ล้ม!") are shaped with **harfbuzz +
+freetype** (`utils/ppe_engine._shape_text_img`) — Pillow alone mis-stacks Thai
+vowel+tone marks. Optional deps (`uharfbuzz`, `freetype-py`); absent → plain Pillow
+fallback (ASCII fine, Thai unshaped). UI text (HTML) is shaped by the browser.
 
-Pipeline (backend `c:\ZENTRA\ZENTRA`, see `TRAINING.md`):
-1. **Collect** — running the app auto-saves frames+YOLO labels to
-   `data/collected/{ppe_violations,zone_intrusions,fall_events,normal}/`
-   via `utils/collector.py`.
-2. **Upload** — `python -m training.upload --task ppe` → Roboflow.
-3. **Label** ⭐ — correct boxes in Roboflow Annotate (the real accuracy driver).
-4. **Train** — `python -m training.trainer --task ppe --project <slug> --export`
-   → `models/ppe_finetuned.pt`. GPU verified working (RTX 3050, CUDA).
-5. **Deploy** — set `USE_LOCAL_MODEL=true` in `.env`.
+## In-app training (Settings → data)
 
-**In-app (Settings → "เกี่ยวกับข้อมูล"):** live collected counts, upload,
-train (task/source/project), live progress (epoch x/y, mAP50, log tail),
-clear-data. Backed by:
-- `server/jobs.py` — `JobManager` runs train/upload as a **separate Python
-  subprocess** (`sys.executable -m ...`, cwd = backend, `PYTHONUTF8=1`), one
-  at a time, streams stdout to a ring buffer, parses epoch/mAP. Never run
-  heavy training inside the web loop.
-- API: `/api/data/stats`, `/api/data/clear`, `/api/jobs/{train,upload,status,stop}`.
-- 4 GB GPU: `.env` pins `YOLO_BASE_MODEL=yolov8s.pt`, `TRAIN_BATCH_SIZE=4`
-  (yolov8m OOMs). `config.TRAIN_AUG` must exist (used by `trainer.train`).
-
-## Backend layout & config (`c:\ZENTRA\ZENTRA`)
-
-- Runtime code at root: `config.py`, `main.py`, `modules/`, `utils/`,
-  `alerts/`, `reports/`, `training/`. Non-code moved to `docs/` (proposals,
-  slides, notebooks) and `archive/` (old snapshots, dead code).
-- `config.py` loads its own `.env` explicitly (`load_dotenv(Path(__file__).parent/".env")`)
-  so it works regardless of the app's cwd. `.env` is git-ignored;
-  `.env.example` has placeholders (no real API key — credential-leak guard).
-- The backend is a **separate git repo** (`Krittpas/Zentra`); the app repo is
-  `ThePpoon/ZENTRA_application`. Commit backend changes locally, don't push
-  them to the app remote. The `if window_title:` guards live in the backend.
+`server/jobs.py` runs train/upload as a **separate subprocess** (`python -m
+training.*`, cwd = `backend/`), one at a time, streaming stdout. Never train inside
+the web loop. Real training needs a CUDA GPU (this dev box may be CPU-only → use
+Colab). See `docs/TRAINING_PIPELINE.md` and `notebooks/`.
 
 ## Where to look when X breaks
 
 | Symptom | Likely cause / file |
 |---|---|
-| Screen blank / stuck on splash | script not executing — `app.js navigate()` script re-injection |
+| Toast "ระบบ AI ไม่ทำงาน" | engine failed to build (missing person model?) — `pipeline._build_engine` |
+| Video, but NO boxes | camera `roles` exclude every drawing module → `data/settings.json` cameras.<id>.roles |
+| Screen blank / stuck | script not re-injected — `app.js navigate()` |
 | Screen breaks on 2nd visit | top-level `let`/`const` in that screen → `var` |
-| No video on dashboard | pipeline not running, or FrameBroadcaster/WS down — check `/api/status`, server console |
-| Chart missing on history | Chart.js `onload` not awaited, or CDN blocked |
-| Alerts not in UI | monkey-patch missed a module namespace |
-| RTSP/file won't connect | body field names must be `rtsp_url`/`video_file_path`/`webcam_index` (match `api.py`) |
-| OpenCV window pops up | a module's `cv2.imshow()` missing the `if window_title:` guard |
-| PPE/Zone detect nothing | inference server down → `docker start zentra-inference` / run launcher; check `curl localhost:9001` |
-| Zone Editor shows no image | pipeline not running → connect a camera first (snapshot needs a live frame) |
-| Zone "no effect" on movement | detection is person-based; a full body's centre must be inside the polygon, not a hand |
-| `mediapipe has no attribute 'solutions'` | reinstall `mediapipe==0.10.14 --no-deps` |
-| `FieldDescriptor ... no attribute 'label'` | `pip install "protobuf>=4.25.3,<5"` |
-| Training crashes immediately | `cfg.TRAIN_AUG` missing, or CUDA OOM → lower `TRAIN_BATCH_SIZE`, use `yolov8n/s.pt` |
-| Emoji/Thai console crash | run via launcher; `app.py` forces UTF-8 stdout |
+| Thai overlay garbled | `uharfbuzz`/`freetype-py` missing → falls back to unshaped Pillow |
+| Zone won't re-alert | rising-edge state — `_zone_inside` in `ppe_engine.detect` |
+| Emoji/Thai console crash | run via `app.py` (forces UTF-8 stdout) |
 
 ## Conventions
 
-- Commit per phase, push to `origin/main` (`https://github.com/ThePpoon/ZENTRA_application.git`).
-- Thai UI copy; font is Sarabun (Google Fonts CDN). Online CDN is allowed.
-- Design tokens in `ui/assets/style.css`: `--bg:#0d1b2a`, `--accent:#7ecfff`,
-  `--green:#4ade80`, `--red:#f87171`, `--emergency:#ef4444`.
+- Thai UI copy; font Sarabun (loaded via Google Fonts CDN — allowed).
+- Design tokens in `ui/assets/style.css`.
+- API is unauthenticated by default → bound to 127.0.0.1. Add auth before exposing.

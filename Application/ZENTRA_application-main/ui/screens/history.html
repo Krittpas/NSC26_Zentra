@@ -360,6 +360,12 @@ async function histClear() {
     var data = await res.json();
     if (data && data.ok) {
       ZENTRA.toast('ลบประวัติแล้ว ' + (data.removed || 0) + ' รายการ', 'success');
+      // Also clear the LIVE client-side counters + recent-alarm list so the
+      // dashboard doesn't keep showing events that were just deleted.
+      ZENTRA.state.alerts = { total: 0, warning: 0, alert: 0, emergency: 0 };
+      ZENTRA.state.recentAlarms = [];
+      ZENTRA.state.last_emergency = null;
+      if (ZENTRA._updateAlertCounters) ZENTRA._updateAlertCounters();
       histRefresh();
     } else {
       ZENTRA.toast('ลบไม่สำเร็จ', 'error');

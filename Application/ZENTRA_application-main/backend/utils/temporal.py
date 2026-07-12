@@ -52,3 +52,8 @@ class CooldownGate:
             self._last[key] = now
             return True
         return False
+
+    def mark(self, key, now: float | None = None) -> None:
+        """Force-record a fire time for `key` (e.g. after firing on a rising edge
+        that bypassed ready()) so the next ready() measures from here."""
+        self._last[key] = time.time() if now is None else now

@@ -43,6 +43,72 @@ def _font(size: int):
     return f
 
 
+# ── Thai-correct overlay text ────────────────────────────────────────────────
+# Pillow has no complex-script shaping, so Thai syllables with a stacked upper
+# vowel AND a tone mark (e.g. "พื้นที่") render with the marks in the wrong place
+# — looks broken on the video overlay. Shape with harfbuzz and rasterise glyphs
+# with freetype so Thai renders correctly. Optional deps: if either is missing we
+# fall back to plain Pillow (Latin/ASCII stays fine; Thai just isn't reshaped).
+try:
+    import uharfbuzz as _hb
+    import freetype as _ft
+    _SHAPE_OK = True
+except Exception:
+    _SHAPE_OK = False
+
+_HB_FONT = None
+_FT_FACE = None
+_TEXT_IMG_CACHE: dict = {}       # (text, size, rgb) -> (RGBA strip, ascent_px)
+
+
+def _shape_text_img(text: str, size: int, rgb: tuple):
+    """RGBA image of `text` with Thai marks positioned correctly (harfbuzz +
+    freetype), transparent background. Cached per (text, size, rgb) because
+    overlay labels repeat every frame. Returns None if shaping is unavailable."""
+    if not _SHAPE_OK or not text:
+        return None
+    key = (text, size, rgb)
+    hit = _TEXT_IMG_CACHE.get(key)
+    if hit is not None:
+        return hit
+    global _HB_FONT, _FT_FACE
+    if _HB_FONT is None:
+        _HB_FONT = _hb.Font(_hb.Face(_FONT_PATH.read_bytes()))
+    if _FT_FACE is None:
+        _FT_FACE = _ft.Face(str(_FONT_PATH))
+    hbf, ftf = _HB_FONT, _FT_FACE
+    hbf.scale = (size * 64, size * 64)
+    buf = _hb.Buffer()
+    buf.add_str(text)
+    buf.guess_segment_properties()
+    _hb.shape(hbf, buf)
+    ftf.set_pixel_sizes(0, size)
+    ascent = int(ftf.size.ascender / 64) or int(size * 1.15)
+    descent = int(-ftf.size.descender / 64)
+    height = max(1, ascent + descent + 2)
+    glyphs, pen = [], 0.0
+    for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
+        glyphs.append((info.codepoint, pen + pos.x_offset / 64.0, pos.y_offset / 64.0))
+        pen += pos.x_advance / 64.0
+    width = max(1, int(pen) + 2)
+    strip = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for gid, gx, gy in glyphs:
+        ftf.load_glyph(gid, _ft.FT_LOAD_RENDER)
+        g = ftf.glyph
+        w, h = g.bitmap.width, g.bitmap.rows
+        if w == 0 or h == 0:
+            continue
+        alpha = np.frombuffer(bytes(g.bitmap.buffer), np.uint8).reshape(h, w)
+        glyph = Image.new("RGBA", (w, h), tuple(rgb) + (0,))
+        glyph.putalpha(Image.fromarray(alpha))
+        strip.alpha_composite(glyph, (int(round(gx + g.bitmap_left)),
+                                      int(round(ascent - g.bitmap_top - gy))))
+    if len(_TEXT_IMG_CACHE) > 512:      # bound the cache (labels churn with ids)
+        _TEXT_IMG_CACHE.clear()
+    _TEXT_IMG_CACHE[key] = (strip, ascent)
+    return _TEXT_IMG_CACHE[key]
+
+
 class PPEEngine:
     @staticmethod
     def _resolve_required(ppe_items) -> set:
@@ -60,9 +126,28 @@ class PPEEngine:
         # items. They are merged back into one dets list before associate().
         self.person_detector = PersonDetector(device=device)
         self.person_detector.reset()
-        self.ppe_detector = Detector(device=device)
-        # Back-compat alias: pipeline logs + /api/status read engine.detector.*
-        self.detector = self.ppe_detector
+        # Per-camera roles gate what runs/draws (roles=None → all on, for the
+        # offline harness). Computed here (was below) so the PPE item detector is
+        # built ONLY when this camera actually enforces PPE.
+        self._device = device
+        self.ppe_enabled  = (roles is None) or ("ppe" in roles)
+        self.zone_enabled = (roles is None) or ("zone" in roles)
+        # ppe_finetuned.pt is git-ignored and absent on a fresh clone, while
+        # person + zone + fall need NO custom PPE weights. If the PPE model is
+        # missing, PAUSE PPE (status → off, honestly) instead of failing the whole
+        # engine to a boxless passthrough — person/zone/fall keep detecting, which
+        # is more honest than clean video with nothing drawn on it. Errors other
+        # than a missing file still propagate.
+        self.ppe_detector = None
+        if self.ppe_enabled:
+            try:
+                self.ppe_detector = Detector(device=device)
+            except FileNotFoundError as e:
+                print(f"[PPEEngine] ⚠️ PPE model unavailable → PPE paused: {e}")
+                self.ppe_enabled = False
+        # Back-compat alias: pipeline logs + /api/status read engine.detector.*;
+        # fall back to the person detector when there is no PPE model loaded.
+        self.detector = self.ppe_detector or self.person_detector
         self.pconf = TrackWindowConfirmer(cfg.PPE_CONFIRM_FRAMES, cfg.PPE_CONFIRM_WINDOW)
         self.pcool = CooldownGate(cfg.VIOLATION_COOLDOWN_SECONDS)
         self.zconf = TrackWindowConfirmer(cfg.ZONE_CONFIRM_FRAMES, cfg.ZONE_CONFIRM_WINDOW)
@@ -70,10 +155,10 @@ class PPEEngine:
         self._zones_path = zones_path
         self._camera_id = camera_id            # only load zones for this camera (None = all)
         self.zones = zone_geometry.load_zones(zones_path, camera_id)
-        # Per-camera detection roles gate what runs/draws. roles=None → all on
-        # (back-compat for the offline harness).
-        self.ppe_enabled  = (roles is None) or ("ppe" in roles)
-        self.zone_enabled = (roles is None) or ("zone" in roles)
+        # (tid, zone_id) currently confirmed-inside a danger zone. Drives rising-edge
+        # alerts: a fresh entry (outside→inside) fires immediately, so leaving and
+        # re-entering alerts again instead of being swallowed by the plain cooldown.
+        self._zone_inside: set = set()
         # Fall is opt-IN even when roles is None: it loads a pose model + a TFLite
         # interpreter, which the PPE-only offline tools have no reason to pay for.
         self.fall_enabled = bool(roles) and ("fall" in roles)
@@ -116,6 +201,15 @@ class PPEEngine:
         """Update which modules run/draw without reloading the model."""
         self.ppe_enabled  = (roles is None) or ("ppe" in roles)
         self.zone_enabled = (roles is None) or ("zone" in roles)
+        # PPE just turned on for a camera that started without it → build the item
+        # detector now. If the model is absent, pause PPE (off) rather than crash.
+        if self.ppe_enabled and self.ppe_detector is None:
+            try:
+                self.ppe_detector = Detector(device=self._device)
+                self.detector = self.ppe_detector
+            except FileNotFoundError as e:
+                print(f"[PPEEngine] ⚠️ PPE model unavailable → PPE paused: {e}")
+                self.ppe_enabled = False
         was = self.fall_enabled
         self.fall_enabled = bool(roles) and ("fall" in roles)
         if self.fall_enabled and not was:
@@ -231,7 +325,9 @@ class PPEEngine:
 
     def reset(self):
         self.person_detector.reset()
-        self.ppe_detector.reset()
+        if self.ppe_detector is not None:
+            self.ppe_detector.reset()
+        self._zone_inside.clear()
 
     def detect(self, frame):
         """Heavy step: track + associate + temporal confirm. Returns (recs, events).
@@ -240,7 +336,8 @@ class PPEEngine:
         # People (+ track ids) from the COCO detector; PPE items from the fine-tune.
         # Skip the PPE pass entirely when the role is off — saves a full forward.
         persons = self.person_detector.track(frame)
-        items = self.ppe_detector.detect_items(frame) if self.ppe_enabled else []
+        items = (self.ppe_detector.detect_items(frame)
+                 if self.ppe_enabled and self.ppe_detector is not None else [])
         recs = associate(persons + items)
         events = []
         live_p, live_z = set(), set()
@@ -276,11 +373,27 @@ class PPEEngine:
                         continue
                     zk = (tid, z.id); live_z.add(zk)
                     inside = z.id in hit_ids
-                    if self.zconf.update(zk, inside) and inside and self.zcool.ready(zk):
-                        events.append({"type": "zone", "track_id": tid, "key": zk,
-                                       "level": cfg.ALERT_LEVEL_ALERT,
-                                       "msg": f"บุกรุกพื้นที่อันตราย '{z.name}' (คนที่ #{tid})"})
+                    confirmed = self.zconf.update(zk, inside)   # ≥3 of last 5 inside
+                    if confirmed and inside:
+                        # Rising edge (fresh entry) alerts immediately; a continuous
+                        # stay re-alerts every cooldown. Tracking "already inside" per
+                        # (track, zone) is what makes leave→re-enter fire again — the
+                        # plain 20s cooldown alone suppressed re-entries and, once the
+                        # person kept one track id, effectively alarmed only once.
+                        if zk not in self._zone_inside:
+                            self._zone_inside.add(zk)
+                            self.zcool.mark(zk)
+                            fire = True
+                        else:
+                            fire = self.zcool.ready(zk)
+                        if fire:
+                            events.append({"type": "zone", "track_id": tid, "key": zk,
+                                           "level": cfg.ALERT_LEVEL_ALERT,
+                                           "msg": f"บุกรุกพื้นที่อันตราย '{z.name}' (คนที่ #{tid})"})
+                    elif not confirmed:
+                        self._zone_inside.discard(zk)   # debounced exit → next entry re-alerts
         self.pconf.gc(live_p); self.zconf.gc(live_z)
+        self._zone_inside &= live_z      # forget zones for tracks that left the frame
         return recs, events
 
     def draw_on(self, frame, recs):
@@ -346,11 +459,26 @@ class PPEEngine:
         return self._draw_texts(frame, texts)
 
     def _draw_texts(self, frame, items, size: int = 18):
-        """Render all overlay text in a single BGR→PIL→BGR pass (Thai-capable),
-        each with a dark pill background + outline for legibility on video."""
+        """Render all overlay text in a single BGR→PIL→BGR pass, each with a dark
+        pill background for legibility on video. Uses harfbuzz shaping so Thai
+        renders correctly (stacked vowel + tone mark); falls back to plain Pillow
+        when the shaping deps are absent."""
         if not items:
             return frame
         img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        if _SHAPE_OK:
+            for (x, y, text, rgb) in items:
+                shaped = _shape_text_img(text, size, tuple(int(c) for c in rgb))
+                if not shaped:
+                    continue
+                strip, _asc = shaped
+                w, h = strip.size
+                x, y = int(x), int(y)
+                pill = Image.new("RGBA", (w + 8, h + 4), (0, 0, 0, 150))
+                img.paste(pill, (x - 4, y - 2), pill)
+                img.paste(strip, (x, y), strip)
+            return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)
+        # Fallback: plain Pillow (no complex-script shaping)
         d = ImageDraw.Draw(img, "RGBA")
         font = _font(size)
         for (x, y, text, rgb) in items:

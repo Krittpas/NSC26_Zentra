@@ -272,7 +272,7 @@ class Pipeline:
             import os as _os
             print(f"[Pipeline] 🧠 PPE engine ready ("
                   f"person={_os.path.basename(eng.person_detector.model_path)}, "
-                  f"ppe={_os.path.basename(eng.ppe_detector.model_path)}, "
+                  f"ppe={_os.path.basename(eng.ppe_detector.model_path) if eng.ppe_detector else 'off (no PPE model)'}, "
                   f"device={eng.detector.device}, camera={cam_id}, zones={len(eng.zones)}, "
                   f"roles={sorted(self._roles) if self._roles is not None else 'all'})")
             return eng

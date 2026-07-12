@@ -110,6 +110,7 @@ app.mount("/ui", _NoCacheStatic(directory=str(UI_DIR)), name="ui")
 _loop:       asyncio.AbstractEventLoop | None = None
 _broadcaster = None
 pipeline     = None   # Pipeline singleton
+_retention_task = None   # periodic PDPA purge task
 
 # LINE pushes are blocking HTTP with retries. They must never run on the
 # detect/fall loop (that thread has a frame budget) nor on the event loop.
@@ -177,8 +178,41 @@ manager = ConnectionManager()
 # ================================================================
 # STARTUP / SHUTDOWN
 # ================================================================
+# PDPA data minimisation runs at startup AND on this timer. The startup purge
+# alone is not enough: a factory box runs for weeks, and without a periodic sweep
+# it would never drop events/snapshots that age past retention_days until the next
+# restart — so old worker evidence would pile up indefinitely. 6h keeps disk and
+# retention honest at negligible cost (one indexed DELETE).
+_RETENTION_INTERVAL_SEC = 6 * 3600
+
+
+def _run_retention_purge() -> None:
+    """Read retention_days from settings and drop older events. Safe to call
+    repeatedly (idempotent — deletes anything past the day cutoff)."""
+    rdays = int((_load_settings().get("data") or {}).get("retention_days", 0) or 0)
+    if rdays <= 0:
+        return
+    from server import store
+    removed = store.purge_before(rdays)
+    if removed:
+        print(f"[API] PDPA retention: purged {removed} event(s) older than {rdays} day(s)")
+
+
+async def _retention_loop():
+    """Re-run the retention purge every _RETENTION_INTERVAL_SEC so a long-running
+    instance keeps honouring retention_days without needing a restart."""
+    while True:
+        try:
+            await asyncio.sleep(_RETENTION_INTERVAL_SEC)
+            await _in_executor(_run_retention_purge)   # off the event loop (SQLite)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[API] retention loop error: {e}")
+
+
 async def _startup():
-    global _loop, _broadcaster, pipeline
+    global _loop, _broadcaster, pipeline, _retention_task
 
     _loop = asyncio.get_running_loop()
 
@@ -189,16 +223,13 @@ async def _startup():
               "(set ZENTRA_API_TOKEN to require a token behind a proxy).")
 
     # PDPA data minimisation: drop events + evidence snapshots older than the
-    # configured retention window (local only). Runs once at startup.
+    # configured retention window (local only). Once now, then every 6h via
+    # _retention_loop so a long-running instance keeps purging.
     try:
-        rdays = int((_load_settings().get("data") or {}).get("retention_days", 0) or 0)
-        if rdays > 0:
-            from server import store
-            removed = store.purge_before(rdays)
-            if removed:
-                print(f"[API] PDPA retention: purged {removed} event(s) older than {rdays} day(s)")
+        _run_retention_purge()
     except Exception as e:
         print(f"[API] retention purge skipped: {e}")
+    _retention_task = asyncio.create_task(_retention_loop())
 
     try:
         # Import Pipeline (adds ZENTRA backend to sys.path, imports cv2/numpy)
@@ -283,7 +314,10 @@ async def _startup():
 
 
 async def _shutdown():
-    global _broadcaster
+    global _broadcaster, _retention_task
+    if _retention_task:
+        _retention_task.cancel()
+        _retention_task = None
     if _broadcaster:
         _broadcaster.stop()
     if pipeline:
@@ -690,7 +724,21 @@ async def history_export(day: str | None = None, start: str | None = None,
 @app.post("/api/history/clear")
 async def history_clear():
     from server import store
-    return JSONResponse({"ok": True, "removed": await _in_executor(store.purge_all)})
+    removed = await _in_executor(store.purge_all)
+    # The dashboard KPIs read the pipeline's LIVE session counters, not the DB, so
+    # clearing History alone leaves stale counts on the dashboard. Zero those too
+    # and broadcast the reset so open dashboards update without a reload.
+    if pipeline is not None:
+        with pipeline._lock:
+            pipeline.status["alerts"] = pipeline._zero_alerts()
+            pipeline.status["last_emergency"] = None
+            snapshot = dict(pipeline.status)
+        if pipeline.on_status:
+            try:
+                pipeline.on_status(snapshot)
+            except Exception:
+                pass
+    return JSONResponse({"ok": True, "removed": removed})
 
 
 # ================================================================
