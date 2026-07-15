@@ -27,7 +27,7 @@
 <!-- ─── Section Templates ─────────────────────────── -->
 <template id="tpl-line">
   <div class="settings-section-title">การแจ้งเตือน LINE</div>
-  <div class="settings-section-sub">ตั้งค่า Token และกลุ่มที่รับการแจ้งเตือนแต่ละระดับ</div>
+  <div class="settings-section-sub">ตั้งค่า Token และกลุ่มที่รับการแจ้งเตือน</div>
 
   <div class="settings-group">
     <div class="settings-group-title">โทเคน LINE (Channel Access Token)</div>
@@ -44,40 +44,16 @@
   </div>
 
   <div class="settings-group">
-    <div class="settings-group-title">กลุ่มรับการแจ้งเตือน</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px">
+      <div class="settings-group-title" style="margin:0">กลุ่มรับการแจ้งเตือน</div>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="addLineGroup()">＋ เพิ่มกลุ่ม</button>
+    </div>
+    <div class="text-muted text-xs" style="margin-bottom:10px">ทุกการแจ้งเตือน (ทุกระดับ) จะถูกส่งไปยังทุกกลุ่มที่เปิดใช้งาน</div>
     <table class="alert-table w-full">
       <thead>
-        <tr><th>ระดับ</th><th>กลุ่มที่ส่ง</th><th>หน่วงเวลา</th><th>เปิด</th></tr>
+        <tr><th>ชื่อกลุ่ม</th><th>กลุ่มที่ส่ง (Group ID)</th><th>หน่วงเวลา</th><th>เปิด</th><th></th></tr>
       </thead>
-      <tbody>
-        <tr>
-          <td><span class="level-badge warning"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>เตือน</span><br><small class="text-muted">ไม่สวม PPE</small></td>
-          <td><input class="input" id="grp-supervisor" type="text" placeholder="Group ID (หัวหน้างาน)" style="font-size:12px;padding:5px 8px"></td>
-          <td><input class="cooldown-input" id="cd-warning" type="number" value="30"> s</td>
-          <td>
-            <label class="toggle"><input type="checkbox" id="tog-warning" checked>
-            <div class="toggle-track"></div><div class="toggle-thumb"></div></label>
-          </td>
-        </tr>
-        <tr>
-          <td><span class="level-badge alert"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>อันตราย</span><br><small class="text-muted">เข้าพื้นที่อันตราย</small></td>
-          <td><input class="input" id="grp-safety" type="text" placeholder="Group ID (Safety Officer)" style="font-size:12px;padding:5px 8px"></td>
-          <td><input class="cooldown-input" id="cd-alert" type="number" value="20"> s</td>
-          <td>
-            <label class="toggle"><input type="checkbox" id="tog-alert" checked>
-            <div class="toggle-track"></div><div class="toggle-thumb"></div></label>
-          </td>
-        </tr>
-        <tr>
-          <td><span class="level-badge emergency"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M5 21h14"/><path d="M4 11h1"/><path d="M19 11h1"/><path d="M15.5 5.5 16 5"/><path d="M8.5 5.5 8 5"/></svg>ฉุกเฉิน</span><br><small class="text-muted">ตรวจพบการล้ม</small></td>
-          <td><input class="input" id="grp-emergency" type="text" placeholder="Group ID (Emergency)" style="font-size:12px;padding:5px 8px"></td>
-          <td><input class="cooldown-input" id="cd-emergency" type="number" value="15"> s</td>
-          <td>
-            <label class="toggle"><input type="checkbox" id="tog-emergency" checked>
-            <div class="toggle-track"></div><div class="toggle-thumb"></div></label>
-          </td>
-        </tr>
-      </tbody>
+      <tbody id="line-groups-body"></tbody>
     </table>
   </div>
 
@@ -418,16 +394,23 @@ function showSection(name, el) {
         : 'Channel Access Token...';
     }
     const alerts = _settings.alerts || {};
-    const cdW = document.getElementById('cd-warning'); if (cdW) cdW.value = alerts.violation_cooldown_seconds ?? 30;
-    const cdA = document.getElementById('cd-alert');   if (cdA) cdA.value = alerts.zone_cooldown_seconds    ?? 20;
-    const cdE = document.getElementById('cd-emergency');if (cdE) cdE.value = alerts.fall_cooldown_seconds   ?? 15;
-    const togW = document.getElementById('tog-warning'); if (togW) togW.checked = alerts.warning_enabled ?? true;
-    const togA = document.getElementById('tog-alert');   if (togA) togA.checked = alerts.alert_enabled   ?? true;
-    const togE = document.getElementById('tog-emergency');if (togE) togE.checked = alerts.emergency_enabled?? true;
     const tu = document.getElementById('tog-upload-img'); if (tu) tu.checked = alerts.upload_images === true;
-    const gS = document.getElementById('grp-supervisor'); if (gS) gS.value = line.group_supervisor || '';
-    const gA = document.getElementById('grp-safety');     if (gA) gA.value = line.group_safety || '';
-    const gE = document.getElementById('grp-emergency');  if (gE) gE.value = line.group_emergency || '';
+
+    // Group list. Every enabled group receives every alert (no per-level routing).
+    // Migrate legacy per-level ids (group_supervisor/safety/emergency) → one row each.
+    var groups = Array.isArray(line.groups) ? line.groups.slice() : [];
+    var hasRealGroup = groups.some(function (g) { return g && String(g.id || '').trim(); });
+    if (!hasRealGroup) {
+      var legacy = [line.group_supervisor, line.group_safety, line.group_emergency];
+      var labels = ['หัวหน้างาน', 'เจ้าหน้าที่ความปลอดภัย', 'เหตุฉุกเฉิน'];
+      var seen = {}, migrated = [];
+      legacy.forEach(function (id, i) {
+        id = String(id || '').trim();
+        if (id && !seen[id]) { seen[id] = 1; migrated.push({ name: labels[i], id: id, cooldown: 30, enabled: true }); }
+      });
+      if (migrated.length) groups = migrated;
+    }
+    renderLineGroups(groups);
   }
   if (name === 'camera') {
     const cam = _settings.camera || {};
@@ -474,17 +457,17 @@ async function saveSettings() {
 
   const tok = document.getElementById('line-token');
   if (tok) { s.line = s.line || {}; s.line.channel_access_token = tok.value; }
-  var gS = document.getElementById('grp-supervisor'); if (gS) { s.line = s.line || {}; s.line.group_supervisor = gS.value.trim(); }
-  var gA = document.getElementById('grp-safety');     if (gA) { s.line = s.line || {}; s.line.group_safety     = gA.value.trim(); }
-  var gE = document.getElementById('grp-emergency');  if (gE) { s.line = s.line || {}; s.line.group_emergency  = gE.value.trim(); }
+  // Group list (all-groups routing). Only write when the LINE section is mounted.
+  if (document.getElementById('line-groups-body')) {
+    s.line = s.line || {};
+    s.line.groups = collectLineGroups();
+    // Drop the legacy per-level keys so they can't shadow the new list.
+    delete s.line.group_supervisor;
+    delete s.line.group_safety;
+    delete s.line.group_emergency;
+  }
 
-  const cdW = document.getElementById('cd-warning'); if (cdW) { s.alerts = s.alerts || {}; s.alerts.violation_cooldown_seconds = parseInt(cdW.value); }
-  const cdA = document.getElementById('cd-alert');   if (cdA) { s.alerts = s.alerts || {}; s.alerts.zone_cooldown_seconds     = parseInt(cdA.value); }
-  const cdE = document.getElementById('cd-emergency');if (cdE){ s.alerts = s.alerts || {}; s.alerts.fall_cooldown_seconds      = parseInt(cdE.value); }
   const tu  = document.getElementById('tog-upload-img'); if (tu) { s.alerts = s.alerts || {}; s.alerts.upload_images = tu.checked; }
-  const twE = document.getElementById('tog-warning');  if (twE) { s.alerts = s.alerts || {}; s.alerts.warning_enabled   = twE.checked; }
-  const taE = document.getElementById('tog-alert');    if (taE) { s.alerts = s.alerts || {}; s.alerts.alert_enabled     = taE.checked; }
-  const teE = document.getElementById('tog-emergency');if (teE) { s.alerts = s.alerts || {}; s.alerts.emergency_enabled = teE.checked; }
 
   const idx  = document.getElementById('cam-idx'); if (idx)  { s.camera = s.camera || {}; s.camera.webcam_index = parseInt(idx.value); }
   const flip = document.getElementById('flip-h');  if (flip) { s.camera = s.camera || {}; s.camera.flip_horizontal = flip.checked; }
@@ -501,6 +484,62 @@ async function saveSettings() {
     _settings = s;
     ZENTRA.toast('บันทึกการตั้งค่าแล้ว', 'success');
   } catch (_) { ZENTRA.toast('บันทึกไม่สำเร็จ', 'error'); }
+}
+
+/* ─── LINE group list (all-groups routing) ─────────────────── */
+function lineGroupRowHtml(g) {
+  g = g || {};
+  var name = ZENTRA.esc(g.name || '');
+  var id   = ZENTRA.esc(g.id || '');
+  var cd   = (g.cooldown != null ? g.cooldown : 30);
+  var en   = (g.enabled !== false);
+  return '<tr data-grp-row>'
+    + '<td><input class="input grp-name" type="text" placeholder="เช่น หัวหน้างาน" value="' + name + '" style="font-size:12px;padding:5px 8px"></td>'
+    + '<td><input class="input grp-id" type="text" placeholder="Group ID" value="' + id + '" style="font-size:12px;padding:5px 8px"></td>'
+    + '<td><input class="cooldown-input grp-cd" type="number" min="0" value="' + cd + '"> s</td>'
+    + '<td><label class="toggle"><input type="checkbox" class="grp-en"' + (en ? ' checked' : '') + '>'
+    + '<div class="toggle-track"></div><div class="toggle-thumb"></div></label></td>'
+    + '<td style="text-align:center"><button type="button" onclick="removeLineGroup(this)" title="ลบกลุ่ม" '
+    + 'style="width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--red);cursor:pointer;font-size:14px;line-height:1">✕</button></td>'
+    + '</tr>';
+}
+
+function renderLineGroups(groups) {
+  var body = document.getElementById('line-groups-body');
+  if (!body) return;
+  if (!groups || !groups.length) groups = [{ name: '', id: '', cooldown: 30, enabled: true }];
+  body.innerHTML = groups.map(lineGroupRowHtml).join('');
+}
+
+function addLineGroup() {
+  var body = document.getElementById('line-groups-body');
+  if (!body) return;
+  body.insertAdjacentHTML('beforeend', lineGroupRowHtml({ name: '', id: '', cooldown: 30, enabled: true }));
+}
+
+function removeLineGroup(btn) {
+  var body = document.getElementById('line-groups-body');
+  var row  = btn && btn.closest('tr');
+  if (!row || !body) return;
+  if (body.querySelectorAll('[data-grp-row]').length <= 1) {
+    ZENTRA.toast('ต้องมีอย่างน้อย 1 กลุ่ม', 'error');
+    return;
+  }
+  row.remove();
+}
+
+function collectLineGroups() {
+  var out = [];
+  document.querySelectorAll('#line-groups-body [data-grp-row]').forEach(function (r) {
+    var idEl = r.querySelector('.grp-id'), nmEl = r.querySelector('.grp-name');
+    var cdEl = r.querySelector('.grp-cd'), enEl = r.querySelector('.grp-en');
+    var id   = (idEl ? idEl.value : '').trim();
+    var name = (nmEl ? nmEl.value : '').trim();
+    var cd   = parseInt(cdEl ? cdEl.value : '30', 10);
+    if (!id && !name) return;                 // skip fully-empty rows
+    out.push({ name: name, id: id, cooldown: isNaN(cd) ? 30 : cd, enabled: enEl ? !!enEl.checked : true });
+  });
+  return out;
 }
 
 function toggleToken() {

@@ -538,9 +538,11 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 SETTINGS_DEFAULTS: dict[str, Any] = {
     "line": {
         "channel_access_token": "",
-        "group_supervisor": "",
-        "group_safety": "",
-        "group_emergency": "",
+        # All enabled groups receive every alert regardless of level. Each group:
+        # {name, id, cooldown, enabled}. Add/remove groups from Settings → LINE.
+        "groups": [
+            {"name": "กลุ่มหลัก", "id": "", "cooldown": 30, "enabled": True},
+        ],
     },
     "ai": {
         # Person-centric engine needs decent person recall; 0.30 matches the
@@ -812,11 +814,12 @@ async def report_send_line(body: dict[str, Any] | None = None):
             return JSONResponse(
                 {"ok": False, "error": "ยังไม่ได้ตั้งค่า LINE Token — ไปที่ ตั้งค่า → การแจ้งเตือน LINE"},
                 status_code=400)
-        # The daily report goes to the supervisor + safety groups only.
-        if not any(getattr(cfg, g, "") for g in
-                   ("LINE_OA_GROUP_SUPERVISOR", "LINE_OA_GROUP_SAFETY")):
+        # The daily report goes to every enabled LINE group.
+        if not (list(getattr(cfg, "LINE_ALL_GROUPS", []) or [])
+                or any(getattr(cfg, g, "") for g in
+                       ("LINE_OA_GROUP_SUPERVISOR", "LINE_OA_GROUP_SAFETY"))):
             return JSONResponse(
-                {"ok": False, "error": "ยังไม่ได้ตั้งค่า Group ID — ต้องมีกลุ่มหัวหน้างาน หรือ Safety อย่างน้อย 1 กลุ่ม"},
+                {"ok": False, "error": "ยังไม่ได้ตั้งค่า Group ID — ต้องมีอย่างน้อย 1 กลุ่ม"},
                 status_code=400)
 
         stats = daily_stats_for_line(day)

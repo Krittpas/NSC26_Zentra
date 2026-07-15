@@ -20,6 +20,10 @@ def _cfg():
 # ── Cooldown (thread-safe) ──────────────────────────────────
 _lock           = threading.Lock()
 _last_sent:     dict[str, float] = {}
+# Per-group throttle for the "all groups" routing model. Keyed by "<group>|<level>"
+# so a warning sent to a group can NEVER suppress a later emergency to that same
+# group — only repeats of the same level+group are throttled.
+_last_group_sent: dict[str, float] = {}
 _alert_queue:   list[dict]       = []
 _queue_lock     = threading.Lock()
 _running        = False
@@ -155,6 +159,7 @@ def send_line_notify(
         "msg":        full_msg,
         "image":      image.copy() if image is not None else None,
         "recipients": recipients,
+        "level":      level,
     }
 
     if async_send:
@@ -172,9 +177,23 @@ def send_line_notify(
 
 
 def _dispatch(payload: dict) -> bool:
+    cfg     = _cfg()
     img_url = upload_image(payload["image"]) if payload.get("image") is not None else ""
+    cd_map  = getattr(cfg, "LINE_GROUP_COOLDOWN", {}) or {}
+    level   = payload.get("level", "")
+    now     = time.time()
     ok = True
     for gid in payload["recipients"]:
+        # Per-group throttle (Settings → หน่วงเวลา). Keyed by group+level so distinct
+        # alert types to the same group don't cancel each other out.
+        cd = int(cd_map.get(gid, 0) or 0)
+        if cd > 0:
+            key = f"{gid}|{level}"
+            with _lock:
+                if now - _last_group_sent.get(key, 0.0) < cd:
+                    print(f"[LINE] Group cooldown '{gid[:12]}' ({level}): skip")
+                    continue
+                _last_group_sent[key] = now
         result = _send_to_group(gid, payload["msg"], img_url)
         if result:
             print(f"[LINE] ✅ Sent → {gid[:12]}...")
@@ -243,10 +262,12 @@ def send_daily_report(stats: dict, report_image=None) -> bool:
     if not cfg.LINE_OA_CHANNEL_ACCESS_TOKEN:
         print("[LINE] Daily report NOT sent: no channel access token")
         return False
-    recipients = list({cfg.LINE_OA_GROUP_SUPERVISOR, cfg.LINE_OA_GROUP_SAFETY} - {""})
+    # All enabled groups get the daily report (same "all groups" model as alerts).
+    recipients = [g for g in dict.fromkeys(getattr(cfg, "LINE_ALL_GROUPS", []) or []) if g]
     if not recipients:
-        print("[LINE] Daily report NOT sent: no group id configured "
-              "(need LINE_OA_GROUP_SUPERVISOR or LINE_OA_GROUP_SAFETY)")
+        recipients = list({cfg.LINE_OA_GROUP_SUPERVISOR, cfg.LINE_OA_GROUP_SAFETY} - {""})
+    if not recipients:
+        print("[LINE] Daily report NOT sent: no group id configured")
         return False
     img_url = upload_image(report_image) if report_image is not None else ""
     ok = False

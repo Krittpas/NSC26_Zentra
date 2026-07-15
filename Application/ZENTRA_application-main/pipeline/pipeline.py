@@ -386,10 +386,12 @@ class Pipeline:
         # dashboard could mean "the AI saw nothing" OR "the AI saw it and the UI
         # dropped it" — two completely different bugs that look identical.
         print(f"[Pipeline] 🚨 {level.upper()} ({ev.get('type')}): {ev.get('msg', '')}")
-        # Per-level alert switch (Settings): a disabled level is fully suppressed.
-        if not self._alert_levels.get(level, True):
-            print(f"[Pipeline] ⏹️  ...ถูกปิดไว้ใน Settings (alerts.{level}_enabled=false) → ไม่ส่ง")
-            return
+        # NOTE: enabling/disabling notifications is now per-LINE-group (each group has
+        # its own "เปิด" toggle in Settings). The old per-LEVEL suppression switch was
+        # removed — it had no UI after that redesign, so a stale
+        # alerts.emergency_enabled=false in settings.json silently swallowed every
+        # fall alert with no way to turn it back on. Alerts always reach the counters
+        # and on_alert here; group routing decides who gets the LINE push.
         with self._lock:
             a = self.status["alerts"]
             a["total"] = a.get("total", 0) + 1
@@ -414,26 +416,57 @@ class Pipeline:
                 import config as cfg
                 if "channel_access_token" in line:
                     cfg.LINE_OA_CHANNEL_ACCESS_TOKEN = line["channel_access_token"]
-                sup = line.get("group_supervisor", getattr(cfg, "LINE_OA_GROUP_SUPERVISOR", ""))
-                saf = line.get("group_safety",     getattr(cfg, "LINE_OA_GROUP_SAFETY", ""))
-                emg = line.get("group_emergency",  getattr(cfg, "LINE_OA_GROUP_EMERGENCY", ""))
-                if any(k in line for k in ("group_supervisor", "group_safety", "group_emergency")):
+
+                # ── Group routing ────────────────────────────────────────────
+                # NEW model: a flat list of groups; EVERY alert (any level) goes to
+                # EVERY enabled group. No per-level routing. Legacy per-level keys
+                # (group_supervisor/safety/emergency) are still honoured as a
+                # fallback so old settings.json files keep working.
+                if isinstance(line.get("groups"), list):
+                    groups = line["groups"]
+                    enabled_ids: list[str] = []
+                    cooldowns: dict[str, int] = {}
+                    for g in groups:
+                        if not isinstance(g, dict):
+                            continue
+                        gid = str(g.get("id", "")).strip()
+                        if not gid:
+                            continue
+                        cooldowns[gid] = int(g.get("cooldown", 30) or 0)
+                        if g.get("enabled", True) and gid not in enabled_ids:
+                            enabled_ids.append(gid)
+                    # CRITICAL: config.ALERT_RECIPIENTS is built ONCE at import time
+                    # from the (then-empty) group ids, and send_line_notify() picks
+                    # recipients from it per level. Rebuild it here with the live ids
+                    # so real detections actually reach LINE — and point every level
+                    # at the SAME full list so all alerts go to all groups.
+                    cfg.ALERT_RECIPIENTS = {
+                        cfg.ALERT_LEVEL_WARNING:   list(enabled_ids),
+                        cfg.ALERT_LEVEL_ALERT:     list(enabled_ids),
+                        cfg.ALERT_LEVEL_EMERGENCY: list(enabled_ids),
+                    }
+                    cfg.LINE_ALL_GROUPS   = list(enabled_ids)   # daily report target
+                    cfg.LINE_GROUP_COOLDOWN = cooldowns          # per-group throttle
+                    # Keep legacy vars pointed at the first enabled group so any code
+                    # (and the send-line validation) that still reads them stays valid.
+                    first = enabled_ids[0] if enabled_ids else ""
+                    cfg.LINE_OA_GROUP_SUPERVISOR = first
+                    cfg.LINE_OA_GROUP_SAFETY     = first
+                    cfg.LINE_OA_GROUP_EMERGENCY  = first
+                elif any(k in line for k in ("group_supervisor", "group_safety", "group_emergency")):
+                    sup = line.get("group_supervisor", getattr(cfg, "LINE_OA_GROUP_SUPERVISOR", ""))
+                    saf = line.get("group_safety",     getattr(cfg, "LINE_OA_GROUP_SAFETY", ""))
+                    emg = line.get("group_emergency",  getattr(cfg, "LINE_OA_GROUP_EMERGENCY", ""))
                     cfg.LINE_OA_GROUP_SUPERVISOR = sup
                     cfg.LINE_OA_GROUP_SAFETY     = saf
                     cfg.LINE_OA_GROUP_EMERGENCY  = emg
-                    # CRITICAL: config.ALERT_RECIPIENTS is built ONCE at import time
-                    # from the (then-empty) group ids, and send_line_notify() picks
-                    # recipients from it per level. Updating the group vars above does
-                    # NOT touch that frozen dict, so live per-event alerts (fall/zone/
-                    # PPE) had an EMPTY recipient list → nothing was ever pushed even
-                    # though the manual daily-report button worked (it reads the group
-                    # vars directly). Rebuild the map here with the live ids so real
-                    # detections actually reach LINE.
+                    allg = [g for g in dict.fromkeys([sup, saf, emg]) if g]
                     cfg.ALERT_RECIPIENTS = {
-                        cfg.ALERT_LEVEL_WARNING:   [sup],
-                        cfg.ALERT_LEVEL_ALERT:     [saf, sup],
-                        cfg.ALERT_LEVEL_EMERGENCY: [emg, saf, sup],
+                        cfg.ALERT_LEVEL_WARNING:   list(allg),
+                        cfg.ALERT_LEVEL_ALERT:     list(allg),
+                        cfg.ALERT_LEVEL_EMERGENCY: list(allg),
                     }
+                    cfg.LINE_ALL_GROUPS = list(allg)
 
                 # ── AI thresholds (INFERENCE_CONFIDENCE is read per-frame in
                 # detect_track → hot; confirm/cooldown need refresh_tunables) ──
@@ -474,12 +507,9 @@ class Pipeline:
                 if "fall_cooldown_seconds" in alerts:
                     cfg.FALL_COOLDOWN_SECONDS = int(alerts["fall_cooldown_seconds"])
 
-                # Per-level alert switches (disabled level → fully suppressed)
-                for lvl, key in (("warning", "warning_enabled"),
-                                 ("alert", "alert_enabled"),
-                                 ("emergency", "emergency_enabled")):
-                    if key in alerts:
-                        self._alert_levels[lvl] = bool(alerts[key])
+                # Per-level alert switches are intentionally NOT read anymore — enable/
+                # disable is per LINE group now (see _emit_event). Any legacy
+                # *_enabled keys still in settings.json are simply ignored.
             except ImportError:
                 pass
 

@@ -487,6 +487,13 @@ ALERT_RECIPIENTS: dict[str, list[str]] = {
     ALERT_LEVEL_EMERGENCY: [LINE_OA_GROUP_EMERGENCY, LINE_OA_GROUP_SAFETY, LINE_OA_GROUP_SUPERVISOR],
 }
 
+# "All groups" routing (rebuilt at runtime by pipeline.apply_settings from the
+# Settings → LINE group list). Every enabled group receives every alert.
+LINE_ALL_GROUPS: list[str] = [g for g in dict.fromkeys(
+    [LINE_OA_GROUP_SUPERVISOR, LINE_OA_GROUP_SAFETY, LINE_OA_GROUP_EMERGENCY]) if g]
+# Per-group send throttle in seconds, keyed by group id ({} = no extra throttle).
+LINE_GROUP_COOLDOWN: dict[str, int] = {}
+
 DAILY_REPORT_TIME = os.getenv("DAILY_REPORT_TIME", "20:00")
 # External public image host used ONLY when LINE_UPLOAD_IMAGES is opted-in.
 # LINE push image messages require a public HTTPS URL we must host ourselves —
