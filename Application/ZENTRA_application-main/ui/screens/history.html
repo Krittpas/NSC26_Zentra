@@ -156,6 +156,7 @@ function histEsc(s) {
 // (ids churn per session). The raw message stays in the DB / search / CSV.
 function histCleanMsg(s) {
   return String(s == null ? '' : s)
+    .replace(/^[\uD800-\uDFFF←-⇿☀-➿⬀-⯿️\s]+/, '')         // leading emoji (old rows)
     .replace(/\s*\(\s*คนที่\s*:?\s*#?\s*\d+\s*\)/g, '')   // "(คนที่ #123)" suffix
     .replace(/^\s*คนที่\s*:?\s*#?\s*\d+\s*:\s*/, '')       // "คนที่ #123:" prefix
     .trim();
@@ -216,7 +217,7 @@ function histRenderTable() {
       body.innerHTML = '<div style="text-align:center;padding:52px 24px;color:var(--text-muted)">'
         + '<svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:14px;opacity:.35"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>'
         + '<div style="font-size:14.5px;font-weight:600;color:var(--text-sub);margin-bottom:4px">ยังไม่มีเหตุการณ์บันทึกไว้</div>'
-        + '<div style="font-size:12.5px;color:var(--text-muted)">เหตุการณ์ความปลอดภัยจะปรากฏที่นี่โดยอัตโนมัติเมื่อระบบตรวจพบ</div>'
+        + '<div style="font-size:12.5px;color:var(--text-muted)">เหตุการณ์จะปรากฏที่นี่อัตโนมัติเมื่อระบบตรวจพบ</div>'
         + '</div>';
     } else {
       body.innerHTML = '<div style="text-align:center;padding:52px 24px;color:var(--text-muted)">'

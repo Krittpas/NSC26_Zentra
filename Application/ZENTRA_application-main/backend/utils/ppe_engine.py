@@ -323,7 +323,7 @@ class PPEEngine:
                            # The ByteTrack id is internal (it churns per session) and
                            # means nothing to an operator — keep it in the event
                            # payload, but out of the human-facing message.
-                           "msg": "⚠️ ตรวจพบการล้ม"})
+                           "msg": "ตรวจพบการล้ม"})
         self.fconf.gc(live)
         self._fallen &= {t for (t,) in live}
         return events

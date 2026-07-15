@@ -3,7 +3,10 @@
    Color palette matched to storyboard screenshots
    ═══════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Kanit:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+/* Kanit is now bundled locally (ui/assets/fonts/kanit/) so the UI always renders
+   in the right font even offline. Previously it loaded from the Google Fonts CDN,
+   which fell back to a system sans-serif whenever the network was down. */
+@import url('/ui/assets/fonts/kanit.css');
 
 /* ─── CSS Variables — Dark "Professional" theme (Protex-style) ──── */
 :root {
@@ -773,29 +776,38 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
 .toggle-wrap { display: flex; align-items: center; gap: 8px; }
 .toggle {
   position: relative;
-  width: 36px; height: 20px;
+  width: 44px; height: 24px;
   flex-shrink: 0;
   cursor: pointer;
+  display: inline-block;
 }
-.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+/* Keep the checkbox filling the switch (not 0×0) so the whole control is a real,
+   easy click target in WebView2 — clicking anywhere on the switch toggles it. */
+.toggle input {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: pointer; z-index: 2;
+}
 .toggle-track {
   position: absolute;
   inset: 0;
   background: var(--border-mid);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 20px;
   transition: background 0.2s;
 }
-.toggle input:checked ~ .toggle-track { background: var(--accent); }
+.toggle input:checked ~ .toggle-track { background: var(--accent); border-color: var(--accent); }
 .toggle-thumb {
   position: absolute;
-  width: 14px; height: 14px;
+  width: 18px; height: 18px;
   border-radius: 50%;
   background: white;
   left: 3px; top: 3px;
   transition: transform 0.2s;
   pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
-.toggle input:checked ~ .toggle-thumb { transform: translateX(16px); }
+.toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
 
 /* ══════════════════════════════════════════════════
    SETTINGS SIDEBAR LAYOUT

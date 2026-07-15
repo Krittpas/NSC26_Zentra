@@ -4,7 +4,7 @@ import threading
 import time
 import webview
 from pathlib import Path
-
+    
 # The ZENTRA AI modules print emoji / Thai (✅ ⚠️ 🪖 →) at import and at
 # runtime. On a Windows cp1252 console these prints raise
 # UnicodeEncodeError, which would crash pipeline startup. Force UTF-8 with

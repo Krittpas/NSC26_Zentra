@@ -26,7 +26,7 @@
 
 <!-- ─── Section Templates ─────────────────────────── -->
 <template id="tpl-line">
-  <div class="settings-section-title">การแจ้งเตือน LINE OA</div>
+  <div class="settings-section-title">การแจ้งเตือน LINE</div>
   <div class="settings-section-sub">ตั้งค่า Token และกลุ่มที่รับการแจ้งเตือนแต่ละระดับ</div>
 
   <div class="settings-group">
@@ -94,15 +94,6 @@
   <div class="settings-group">
     <div class="flex flex-col gap-3">
       <div>
-        <label class="input-label">โหมดตรวจจับการล้ม (Fall)</label>
-        <select class="input" id="sel-fall-mode">
-          <option value="hybrid">Hybrid — YOLO + Pose (แนะนำ: false alarm น้อย, หลายคน)</option>
-          <option value="yolo">YOLO อย่างเดียว — ตรวจ "ล้ม" ตรงๆ (หลายคน)</option>
-          <option value="pose">Pose อย่างเดียว — MediaPipe (วิเคราะห์ท่าทาง, คนเดียว)</option>
-        </select>
-        <div class="text-xs text-muted" style="margin-top:4px">Hybrid: YOLO ยืนยันต่อเนื่อง + ใช้ pose ช่วยยืนยัน · pose อย่างเดียวไม่ทำให้เตือน (ลด false alarm)</div>
-      </div>
-      <div>
         <div class="flex justify-between mb-1">
           <span class="input-label">ความเชื่อมั่นการตรวจ PPE</span>
           <span class="text-accent font-600" id="val-ppe">0.30</span>
@@ -155,7 +146,7 @@
 
 <template id="tpl-data">
   <div class="settings-section-title">ข้อมูลและการเทรนโมเดล</div>
-  <div class="settings-section-sub">เก็บภาพอัตโนมัติขณะใช้งาน → label ให้ถูก → เทรนให้แม่นขึ้น</div>
+  <div class="settings-section-sub">เก็บภาพอัตโนมัติขณะใช้งาน พร้อมนำไปเทรนเพื่อความแม่นยำ</div>
 
   <!-- Collected data -->
   <div class="settings-group">
@@ -312,7 +303,43 @@
 </template>
 
 <template id="tpl-about">
-  <div class="settings-section-sub">ข้อมูลผู้พัฒนา</div>
+  <div class="settings-section-title">การจัดการระบบ</div>
+  <div class="settings-section-sub">ข้อมูลระบบและผู้พัฒนา</div>
+
+  <!-- System identity card -->
+  <div class="settings-group">
+    <div class="card" style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:30px 20px;gap:6px">
+      <img src="/ui/assets/logo.png" alt="ZENTRA"
+           style="width:128px;height:128px;object-fit:contain;margin-bottom:8px"
+           onerror="this.outerHTML='&lt;span class=&quot;brand-mark&quot; style=&quot;width:110px;height:110px;font-size:54px;border-radius:26px;margin-bottom:8px&quot;&gt;Z&lt;/span&gt;'">
+      <div style="font-size:26px;font-weight:800;letter-spacing:3px;color:var(--accent)">ZENTRA</div>
+      <div class="text-sub" style="font-size:13.5px;max-width:420px;line-height:1.6">เซนตรามากกว่าความปลอดภัย คือความมั่นใจของทุกคนในครอบครัว</div>
+      <div class="text-muted text-xs" style="margin-top:2px">ระบบ AI เฝ้าระวังความปลอดภัยในโรงงาน</div>
+    </div>
+  </div>
+
+  <!-- Developer credits — three columns on one row -->
+  <div class="settings-group">
+    <div class="settings-group-title">ผู้พัฒนา</div>
+    <div class="card">
+      <div style="display:flex;align-items:stretch">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;padding:4px 6px">
+          <span style="width:46px;height:46px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">กท</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text)">กฤตภาส เทพธรณี</span>
+        </div>
+        <div style="width:1px;background:var(--border);flex-shrink:0"></div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;padding:4px 6px">
+          <span style="width:46px;height:46px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">พธ</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text)">พลวัฒน์ ธนทัตธาดา</span>
+        </div>
+        <div style="width:1px;background:var(--border);flex-shrink:0"></div>
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;padding:4px 6px">
+          <span style="width:46px;height:46px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">ณก</span>
+          <span style="font-size:13px;font-weight:600;color:var(--text)">ณัฐนนท์ กุมพันณ์</span>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script>

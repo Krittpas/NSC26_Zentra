@@ -8,9 +8,16 @@ import asyncio
 import base64
 import hmac
 import json
+import mimetypes
 import os
 import threading
 import time
+
+# Bundled web fonts: Python's mimetypes doesn't know woff2 → StaticFiles would
+# serve it with a generic type. Register the correct type so the browser accepts
+# the locally-hosted Kanit font without complaint.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager

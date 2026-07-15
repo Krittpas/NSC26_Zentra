@@ -250,7 +250,7 @@ const ZENTRA = {
       + 'width:24px;height:24px;border:none;background:rgba(255,255,255,.18);color:#fff;'
       + 'border-radius:6px;cursor:pointer;font-size:15px;line-height:1;display:flex;'
       + 'align-items:center;justify-content:center">×</button>';
-    bar.firstChild.textContent = '⚠ ระบบ AI ไม่ทำงาน — ไม่มีการตรวจจับใด ๆ: ' + err;
+    bar.firstChild.textContent = 'ระบบ AI ไม่ทำงาน — ไม่มีการตรวจจับใด ๆ: ' + err;
     if (!existing) document.body.appendChild(bar);
   },
 
@@ -328,7 +328,7 @@ const ZENTRA = {
       return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'
         + '<span style="width:8px;height:8px;border-radius:50%;background:' + col + ';flex-shrink:0;margin-top:5px"></span>'
         + '<div style="flex:1;min-width:0">'
-        + '<div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ZENTRA.esc(it.message) + '</div>'
+        + '<div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + ZENTRA.esc(ZENTRA.cleanMsg(it.message)) + '</div>'
         + '<div style="font-size:11.5px;color:var(--text-muted);margin-top:1px">' + ZENTRA.esc(it.time) + (it.camera ? ' · ' + ZENTRA.esc(it.camera) : '') + '</div>'
         + '</div>'
         + '<span style="padding:2px 8px;border-radius:99px;background:' + bg + ';color:' + col + ';font-size:10.5px;font-weight:700;white-space:nowrap;flex-shrink:0">' + lvl.toUpperCase() + '</span>'
@@ -434,6 +434,15 @@ ZENTRA.esc = function (s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
+};
+
+/* Strip a leading emoji/symbol from an alert message (e.g. an old "⚠️ ตรวจพบ…"
+   still in the DB). New events are emitted without one; this cleans historical
+   rows at display time. Surrogate range \uD800-\uDFFF covers pictographic emoji. */
+ZENTRA.cleanMsg = function (s) {
+  return String(s == null ? '' : s)
+    .replace(/^[\uD800-\uDFFF←-⇿☀-➿⬀-⯿️\s]+/, '')
+    .trim();
 };
 
 /* Set an <img>.src for a URL that may require the API token. A plain <img src>

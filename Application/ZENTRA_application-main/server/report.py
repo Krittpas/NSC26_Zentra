@@ -40,6 +40,11 @@ FIG_W, FIG_H = 8.27, 11.69                 # A4 portrait (inches)
 _MARGIN = 1.0                               # 1-inch margins on all sides
 FS_TITLE, FS_HEAD, FS_BODY, FS_SMALL = 20, 18, 16, 14   # pt
 
+# Per request: ALL letter/text is black. Colour is reserved for graphics only
+# (chart bars, severity meters). Hierarchy comes from size + weight, not colour.
+INK  = "#000000"
+GRID = "#cdd6e3"                            # graphic hairlines (dividers/axes)
+
 
 def _X(inch: float) -> float:
     return inch / FIG_W
@@ -158,14 +163,14 @@ def build_daily_pdf(day: Optional[str] = None, start: Optional[str] = None,
         yt = L
 
         fig.text(_X(L), _Y(yt), "รายงานความปลอดภัย", fontsize=FS_TITLE,
-                 fontweight="bold", color="#0f172a", va="top"); yt += 0.48
-        fig.text(_X(L), _Y(yt), company, fontsize=FS_BODY, color="#1e293b", va="top"); yt += 0.32
-        fig.text(_X(L), _Y(yt), f"สถานที่/ไลน์: {site}    ·    {period}",
-                 fontsize=FS_BODY, color="#334155", va="top"); yt += 0.32
+                 fontweight="bold", color=INK, va="top"); yt += 0.48
+        fig.text(_X(L), _Y(yt), company, fontsize=FS_BODY, color=INK, va="top"); yt += 0.32
+        fig.text(_X(L), _Y(yt), f"สถานที่: {site}    ·    {period}",
+                 fontsize=FS_BODY, color=INK, va="top"); yt += 0.32
         fig.text(_X(L), _Y(yt),
                  f"ผู้จัดทำ: {preparer}    ·    ออกรายงาน: {datetime.now().strftime('%d-%m-%Y %H:%M')}",
-                 fontsize=FS_SMALL, color="#64748b", va="top"); yt += 0.30
-        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color="#cdd6e3", lw=1)); yt += 0.34
+                 fontsize=FS_SMALL, color=INK, va="top"); yt += 0.30
+        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color=GRID, lw=1)); yt += 0.34
 
         # KPI row (value 18 bold, small caption underneath)
         idx = _safety_index(stats["total"])
@@ -178,16 +183,16 @@ def build_daily_pdf(day: Optional[str] = None, start: Optional[str] = None,
             ("ฉุกเฉิน/ล้ม", str(stats["emergency"]),      "#dc2626"),
         ]
         colw = (R - L) / len(kpis)
-        for i, (label, val, color) in enumerate(kpis):
+        for i, (label, val, _color) in enumerate(kpis):
             cx = L + i * colw
-            fig.text(_X(cx), _Y(yt), val, fontsize=FS_HEAD, fontweight="bold", color=color, va="top")
-            fig.text(_X(cx), _Y(yt + 0.36), label, fontsize=12.5, color="#475569", va="top")
+            fig.text(_X(cx), _Y(yt), val, fontsize=FS_HEAD, fontweight="bold", color=INK, va="top")
+            fig.text(_X(cx), _Y(yt + 0.36), label, fontsize=12.5, color=INK, va="top")
         yt += 0.92
-        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color="#eef2f7", lw=1)); yt += 0.36
+        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color=GRID, lw=1)); yt += 0.36
 
-        # Severity breakdown
+        # Severity breakdown — text black; the meter bar carries the colour
         fig.text(_X(L), _Y(yt), "สรุปตามระดับความรุนแรง", fontsize=FS_HEAD,
-                 fontweight="bold", color="#0f172a", va="top"); yt += 0.46
+                 fontweight="bold", color=INK, va="top"); yt += 0.46
         sev = {"warning": 0, "alert": 0, "emergency": 0}
         for e in events:
             if e["level"] in sev:
@@ -195,39 +200,43 @@ def build_daily_pdf(day: Optional[str] = None, start: Optional[str] = None,
         total_sev = max(1, len(events))
         for lvl in ("emergency", "alert", "warning"):
             c = _LVL_COLOR[lvl]
-            fig.text(_X(L + 0.1), _Y(yt), _LVL_TH[lvl], fontsize=FS_BODY, color="#334155", va="top")
+            fig.text(_X(L + 0.1), _Y(yt), _LVL_TH[lvl], fontsize=FS_BODY, color=INK, va="top")
             bx = _X(L + 2.6); bw = _X(R - 0.7) - bx; by = _Y(yt + 0.13); bh = 0.014
             fig.add_artist(plt.Rectangle((bx, by), bw, bh, color="#eef2f7"))
             fig.add_artist(plt.Rectangle((bx, by), max(0.004, bw * sev[lvl] / total_sev), bh, color=c))
             fig.text(_X(R), _Y(yt), str(sev[lvl]), fontsize=FS_BODY, fontweight="bold",
-                     color=c, ha="right", va="top")
+                     color=INK, ha="right", va="top")
             yt += 0.42
         yt += 0.18
 
-        # Trend chart
+        # Trend chart. Axes: x = time bucket, y = number of events.
         fig.text(_X(L), _Y(yt), ("แนวโน้มเหตุการณ์รายวัน" if is_range else "แนวโน้มเหตุการณ์รายชั่วโมง"),
-                 fontsize=FS_HEAD, fontweight="bold", color="#0f172a", va="top"); yt += 0.42
+                 fontsize=FS_HEAD, fontweight="bold", color=INK, va="top"); yt += 0.42
         ch_h = 2.1                                  # chart height (inches)
-        ax = fig.add_axes([_X(L), _Y(yt + ch_h), W, ch_h / FIG_H])
+        ch_left = L + 0.55                          # room on the left for the y-axis label
+        ax = fig.add_axes([_X(ch_left), _Y(yt + ch_h), _X(R) - _X(ch_left), ch_h / FIG_H])
         if is_range:
             counts = store.daily_counts(start=start, end=end)
             labels = list(counts.keys()); values = [counts[k] for k in labels]
             ax.bar(range(len(labels)), values, color="#2563eb", width=0.7)
             ax.set_xticks(range(len(labels)))
-            ax.set_xticklabels([l[5:] for l in labels], fontsize=12, color="#64748b",
+            ax.set_xticklabels([l[5:] for l in labels], fontsize=12, color=INK,
                                rotation=45, ha="right")
+            ax.set_xlabel("วันที่ (เดือน-วัน)", fontsize=12, color=INK)
         else:
             hourly = store.hourly(day); hours = [f"{h:02d}" for h in range(24)]
             values = [hourly.get(h, 0) for h in hours]
             ax.bar(range(24), values, color="#2563eb", width=0.7)
             ax.set_xticks(range(0, 24, 2))
-            ax.set_xticklabels([f"{h:02d}" for h in range(0, 24, 2)], fontsize=12, color="#64748b")
-        ax.tick_params(axis="y", labelsize=12, colors="#64748b")
+            ax.set_xticklabels([f"{h:02d}" for h in range(0, 24, 2)], fontsize=12, color=INK)
+            ax.set_xlabel("เวลา (นาฬิกา 00–23)", fontsize=12, color=INK)
+        ax.set_ylabel("จำนวนเหตุการณ์ (ครั้ง)", fontsize=12, color=INK)
+        ax.tick_params(axis="y", labelsize=12, colors=INK)
         if max(values, default=0) <= 5:
             ax.set_ylim(0, 5)
         for s in ("top", "right"):
             ax.spines[s].set_visible(False)
-        ax.spines["left"].set_color("#cdd6e3"); ax.spines["bottom"].set_color("#cdd6e3")
+        ax.spines["left"].set_color(GRID); ax.spines["bottom"].set_color(GRID)
         ax.grid(axis="y", color="#e2e8f0", lw=0.6)
 
         _page_number(fig, 1)
@@ -239,14 +248,14 @@ def build_daily_pdf(day: Optional[str] = None, start: Optional[str] = None,
         fig = plt.figure(figsize=(FIG_W, FIG_H)); fig.patch.set_facecolor("white")
         yt = L
         fig.text(_X(L), _Y(yt), f"รายงานความปลอดภัย · {period}",
-                 fontsize=FS_SMALL, color="#94a3b8", va="top"); yt += 0.30
-        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color="#eef2f7", lw=1)); yt += 0.36
+                 fontsize=FS_SMALL, color=INK, va="top"); yt += 0.30
+        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color=GRID, lw=1)); yt += 0.36
 
         # Evidence gallery (up to 5)
         snaps = [e for e in events if e.get("has_snapshot")][:5]
         if snaps:
             fig.text(_X(L), _Y(yt), "ตัวอย่างภาพหลักฐาน", fontsize=FS_HEAD,
-                     fontweight="bold", color="#0f172a", va="top"); yt += 0.42
+                     fontweight="bold", color=INK, va="top"); yt += 0.42
             th_w, th_h, gap = 1.15, 0.82, 0.12
             for i, e in enumerate(snaps):
                 p = store.snapshot_path(e["id"])
@@ -260,55 +269,58 @@ def build_daily_pdf(day: Optional[str] = None, start: Optional[str] = None,
                 axx = fig.add_axes([_X(cx), _Y(yt + th_h), th_w / FIG_W, th_h / FIG_H])
                 axx.imshow(img); axx.set_xticks([]); axx.set_yticks([])
                 for sp in axx.spines.values():
-                    sp.set_color("#cdd6e3")
-                axx.set_title(e.get("time", ""), fontsize=11, color="#64748b")
+                    sp.set_color(GRID)
+                axx.set_title(e.get("time", ""), fontsize=11, color=INK)
             yt += th_h + 0.5
 
         # Event log (with a manual corrective-action column)
         fig.text(_X(L), _Y(yt), "บันทึกเหตุการณ์", fontsize=FS_HEAD,
-                 fontweight="bold", color="#0f172a", va="top"); yt += 0.44
+                 fontweight="bold", color=INK, va="top"); yt += 0.44
         c_time, c_type, c_detail, c_action = L, 2.2, 3.3, 5.7
         for cx, head in ((c_time, "เวลา"), (c_type, "ประเภท"),
                          (c_detail, "รายละเอียด"), (c_action, "การแก้ไข/ผู้รับผิดชอบ")):
             fig.text(_X(cx), _Y(yt), head, fontsize=FS_SMALL, fontweight="bold",
-                     color="#64748b", va="top")
+                     color=INK, va="top")
         yt += 0.30
-        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color="#cdd6e3", lw=0.8)); yt += 0.14
+        fig.add_artist(plt.Line2D([_X(L), _X(R)], [_Y(yt), _Y(yt)], color=GRID, lw=0.8)); yt += 0.14
 
-        shown = 10
+        shown = 8    # cap so the signature block always fits under the table
         if not events:
             fig.text(_X(L + 0.1), _Y(yt), "— ไม่มีเหตุการณ์ในช่วงนี้ —",
-                     fontsize=FS_BODY, color="#94a3b8", va="top"); yt += 0.36
+                     fontsize=FS_BODY, color=INK, va="top"); yt += 0.36
         else:
             for e in events[:shown]:
-                c = _LVL_COLOR.get(e["level"], "#475569")
                 fig.text(_X(c_time), _Y(yt), f"{_fmt_date(e.get('date',''))[:5]} {e['time']}",
-                         fontsize=FS_BODY, color="#334155", va="top")
+                         fontsize=FS_BODY, color=INK, va="top")
                 fig.text(_X(c_type), _Y(yt), _TYPE_TH.get(e["type"], e["type"]),
-                         fontsize=FS_BODY, fontweight="bold", color=c, va="top")
+                         fontsize=FS_BODY, fontweight="bold", color=INK, va="top")
                 fig.text(_X(c_detail), _Y(yt), _clean_msg(e["message"])[:20],
-                         fontsize=FS_BODY, color="#0f172a", va="top")
+                         fontsize=FS_BODY, color=INK, va="top")
                 # blank write-in line for the corrective action
                 fig.add_artist(plt.Line2D([_X(c_action), _X(R)], [_Y(yt + 0.24), _Y(yt + 0.24)],
                                color="#e2e8f0", lw=0.8))
                 yt += 0.36
             if len(events) > shown:
                 fig.text(_X(L), _Y(yt), f"… และอีก {len(events) - shown} เหตุการณ์ (ดูไฟล์ CSV)",
-                         fontsize=FS_SMALL, color="#94a3b8", va="top"); yt += 0.34
+                         fontsize=FS_SMALL, color=INK, va="top"); yt += 0.34
 
-        # Signature block
-        yt = max(yt + 0.5, 8.9)
-        for i, role in enumerate(("ผู้จัดทำรายงาน", "ผู้ตรวจสอบ (จป.)", "ผู้อนุมัติ")):
-            x = L + i * ((R - L) / 3)
-            fig.add_artist(plt.Line2D([_X(x), _X(x + 1.7)], [_Y(yt), _Y(yt)],
-                           color="#94a3b8", lw=0.8))
-            fig.text(_X(x), _Y(yt + 0.24), role, fontsize=FS_BODY, color="#475569", va="top")
-            fig.text(_X(x), _Y(yt + 0.52), "วันที่ ......../......../........",
-                     fontsize=FS_SMALL, color="#94a3b8", va="top")
+        # Signature block — layout 2 + 1: (ผู้จัดทำรายงาน | ผู้ตรวจสอบ (จป.)) on one
+        # row, a blank line, then ผู้อนุมัติ centred. Each box uses the standard Thai
+        # form style: a dotted sign line ending in the role, then a name in ().
+        def _sign_box(cx_in: float, role: str) -> None:
+            fig.text(_X(cx_in), _Y(yt),        f"ลงชื่อ  {'.' * 20}  {role}",
+                     fontsize=FS_BODY, color=INK, ha="center", va="top")
+            fig.text(_X(cx_in), _Y(yt + 0.36), f"({'.' * 34})",
+                     fontsize=FS_BODY, color=INK, ha="center", va="top")
+            fig.text(_X(cx_in), _Y(yt + 0.72), "วันที่ ....... /....... /.......",
+                     fontsize=FS_BODY, color=INK, ha="center", va="top")
 
-        fig.text(_X(L), _Y(FIG_H - 0.8),
-                 "ข้อมูลจัดเก็บภายในเครื่อง (on-device) ตามหลัก PDPA · อ้างอิงแนวทาง OHS/ISO 45001",
-                 fontsize=12, color="#94a3b8", va="top")
+        yt = max(yt + 0.5, 7.6)
+        half = (R - L) / 2
+        _sign_box(L + half / 2,        "ผู้จัดทำรายงาน")      # row 1 · left
+        _sign_box(L + half + half / 2, "ผู้ตรวจสอบ (จป.)")   # row 1 · right
+        yt += 1.30                                            # row 1 (3 lines) + blank line
+        _sign_box((L + R) / 2,         "ผู้อนุมัติ")          # row 2 · centred
         _page_number(fig, 2)
         if dbg_png:
             fig.savefig(dbg_png + "_p2.png", dpi=130)

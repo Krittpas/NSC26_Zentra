@@ -421,6 +421,19 @@ class Pipeline:
                     cfg.LINE_OA_GROUP_SUPERVISOR = sup
                     cfg.LINE_OA_GROUP_SAFETY     = saf
                     cfg.LINE_OA_GROUP_EMERGENCY  = emg
+                    # CRITICAL: config.ALERT_RECIPIENTS is built ONCE at import time
+                    # from the (then-empty) group ids, and send_line_notify() picks
+                    # recipients from it per level. Updating the group vars above does
+                    # NOT touch that frozen dict, so live per-event alerts (fall/zone/
+                    # PPE) had an EMPTY recipient list → nothing was ever pushed even
+                    # though the manual daily-report button worked (it reads the group
+                    # vars directly). Rebuild the map here with the live ids so real
+                    # detections actually reach LINE.
+                    cfg.ALERT_RECIPIENTS = {
+                        cfg.ALERT_LEVEL_WARNING:   [sup],
+                        cfg.ALERT_LEVEL_ALERT:     [saf, sup],
+                        cfg.ALERT_LEVEL_EMERGENCY: [emg, saf, sup],
+                    }
 
                 # ── AI thresholds (INFERENCE_CONFIDENCE is read per-frame in
                 # detect_track → hot; confirm/cooldown need refresh_tunables) ──
