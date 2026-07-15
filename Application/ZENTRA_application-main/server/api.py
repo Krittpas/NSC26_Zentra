@@ -118,6 +118,32 @@ _retention_task = None   # periodic PDPA purge task
 _line_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="line-push")
 
 
+def _camera_label() -> str:
+    """Which camera produced the event that is being recorded RIGHT NOW.
+
+    This used to be the string literal "Cam 1", so every row in History claimed
+    to come from Cam 1 no matter which camera was actually running — the evidence
+    could not be traced back to a place, which is most of what History is for.
+
+    The running pipeline knows its own camera_id (set on /api/pipeline/start), so
+    take it from there. A human name from settings (`cameras.<id>.name`) wins when
+    the operator has set one; otherwise the id itself is used, which is at least
+    true. Falls back to "unknown" rather than inventing a camera.
+    """
+    cam_id = ""
+    if pipeline is not None:
+        cam_id = (pipeline._source_config or {}).get("camera_id") or ""
+    if not cam_id:
+        return "unknown"
+    try:
+        cam = (_load_settings().get("cameras") or {}).get(cam_id)
+        if isinstance(cam, dict) and str(cam.get("name", "")).strip():
+            return str(cam["name"]).strip()
+    except Exception:
+        pass
+    return cam_id
+
+
 def _push_line(event_id: int, msg: str, level: str, ev_type: str, frame) -> None:
     """Send one alert to LINE and record the real outcome against the event.
 
@@ -249,9 +275,10 @@ async def _startup():
             except Exception:
                 snap = frame = None
             from server import store
+            camera = _camera_label()
             # Persist FIRST: evidence must survive a LINE/network failure. The
             # line_sent flag is corrected by _push_line once the push resolves.
-            event = store.add_event(level=level, message=msg, camera="Cam 1",
+            event = store.add_event(level=level, message=msg, camera=camera,
                                     frame_jpeg=snap, line_sent=False, type_=ev_type)
             _line_pool.submit(_push_line, event["id"], msg, level, ev_type, frame)
             # Authoritative counts from the pipeline (avoids client drift)
@@ -265,7 +292,7 @@ async def _startup():
                 "kind":         ev_type,
                 "message":      event["message"],
                 "timestamp":    event["time"],
-                "camera":       "Cam 1",
+                "camera":       camera,
                 "alerts":       alerts,
                 "has_snapshot": event["has_snapshot"],
             }
@@ -761,14 +788,37 @@ async def report_daily_pdf(day: str | None = None, start: str | None = None,
 
 @app.post("/api/report/send-line")
 async def report_send_line(body: dict[str, Any] | None = None):
+    """Push the daily summary to LINE and report the REAL outcome.
+
+    This used to return ok:True unconditionally, so with LINE unconfigured (no
+    token / no group id) the UI cheerfully said "sent" while nothing left the
+    machine. A safety tool must never claim an alert was delivered when it wasn't.
+    """
     body = body or {}
     day  = body.get("day")
     try:
         from server.report import daily_stats_for_line
         from alerts.line_notify import send_daily_report
+        import config as cfg
+
+        if not getattr(cfg, "LINE_OA_CHANNEL_ACCESS_TOKEN", ""):
+            return JSONResponse(
+                {"ok": False, "error": "ยังไม่ได้ตั้งค่า LINE Token — ไปที่ ตั้งค่า → การแจ้งเตือน LINE"},
+                status_code=400)
+        # The daily report goes to the supervisor + safety groups only.
+        if not any(getattr(cfg, g, "") for g in
+                   ("LINE_OA_GROUP_SUPERVISOR", "LINE_OA_GROUP_SAFETY")):
+            return JSONResponse(
+                {"ok": False, "error": "ยังไม่ได้ตั้งค่า Group ID — ต้องมีกลุ่มหัวหน้างาน หรือ Safety อย่างน้อย 1 กลุ่ม"},
+                status_code=400)
+
         stats = daily_stats_for_line(day)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, send_daily_report, stats)
+        loop  = asyncio.get_running_loop()
+        sent  = await loop.run_in_executor(None, send_daily_report, stats)
+        if not sent:
+            return JSONResponse(
+                {"ok": False, "error": "LINE ปฏิเสธคำขอ — ตรวจสอบว่า Token ถูกต้องและบอทอยู่ในกลุ่มนั้น"},
+                status_code=502)
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

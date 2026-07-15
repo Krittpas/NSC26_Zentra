@@ -53,7 +53,7 @@ def _db() -> sqlite3.Connection:
 
 
 # ── Write ─────────────────────────────────────────────────────
-def add_event(level: str, message: str, camera: str = "Cam 1",
+def add_event(level: str, message: str, camera: str = "unknown",
               frame_jpeg: Optional[bytes] = None, line_sent: bool = True,
               type_: Optional[str] = None) -> dict:
     """Insert an event, optionally saving a local evidence snapshot."""

@@ -1,0 +1,39 @@
+# requirements.txt — ZENTRA System Dependencies
+# Install: pip install -r requirements.txt
+
+# ── Core ─────────────────────────────────────────────────────
+opencv-python>=4.9.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# ── Thai overlay text shaping ────────────────────────────────
+# Pillow has no complex-script shaping, so Thai stacked vowel + tone mark (e.g.
+# "พื้นที่") render misplaced on the video overlay. harfbuzz shapes and freetype
+# rasterises so it renders correctly (utils/ppe_engine._shape_text_img). Optional:
+# if absent the overlay falls back to plain Pillow (ASCII fine, Thai unshaped).
+uharfbuzz>=0.39.0
+freetype-py>=2.4.0
+
+# ── AI / ML (all inference runs IN-PROCESS via ultralytics — no Docker server) ──
+ultralytics>=8.1.0        # YOLO person/PPE detect + ByteTrack + pose (in-process)
+# mediapipe: ONLY needed if FALL_POSE_BACKEND=mediapipe (default is "yolo", which
+# uses yolo11n-pose and needs nothing here). Pinned pair — newer protobuf breaks it.
+mediapipe==0.10.14        # optional pose backend (33 kpts) — pinned: ships mp.solutions
+protobuf>=4.25.3,<5       # REQUIRED by mediapipe 0.10.14 (protobuf 5+/7 breaks it)
+
+# ── Training ─────────────────────────────────────────────────
+roboflow>=1.1.0           # Dataset download + upload
+torch>=2.1.0              # PyTorch (backend สำหรับ Ultralytics)
+torchvision>=0.16.0
+
+# ── Optional: TensorRT Export ────────────────────────────────
+# onnxruntime>=1.17.0
+# onnx>=1.15.0
+
+# ── Optional: MQTT (IoT Sensor) ──────────────────────────────
+# paho-mqtt>=1.6.1
+
+# TFLite runtime for the fall-detection Transformer (backend/assets/models/*.tflite)
+ai-edge-litert>=2.1.0

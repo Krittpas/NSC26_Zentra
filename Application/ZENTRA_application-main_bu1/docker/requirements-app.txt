@@ -1,0 +1,15 @@
+# Slim runtime deps for the ZENTRA PPE app container (ultralytics-direct, no
+# mediapipe/roboflow/inference-sdk). CPU torch by default; GPU host → cuda wheels.
+torch
+torchvision
+ultralytics
+lapx            # provides the `lap` module ultralytics ByteTrack needs (prebuilt wheel)
+opencv-python-headless
+numpy
+pyyaml
+python-dotenv
+requests
+fastapi
+uvicorn
+websockets
+python-multipart

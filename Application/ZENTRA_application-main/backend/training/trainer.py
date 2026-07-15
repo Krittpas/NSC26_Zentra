@@ -257,8 +257,19 @@ class DatasetPreparer:
 
     # ── Private ───────────────────────────────────────────────
     def _write_yaml(self) -> str:
+        """data.yaml for a dataset built from data/collected/.
+
+        The class list MUST be cfg.PPE_TAXONOMY, in that exact order: the .txt
+        labels being trained on were written by utils/collector.py, which emits
+        indices in the taxonomy's index space (cfg.ppe_taxo_index). Building the
+        names from sorted(PPE_CLASSES display labels) instead — as this did —
+        produces a DIFFERENT class space (13 names, alphabetical), so every label
+        index silently points at the wrong class and the run trains on noise
+        without raising anything. The taxonomy is the single source of truth for
+        indices; both sides must read it.
+        """
         cfg         = self.cfg
-        class_names = sorted({v["label"] for v in cfg.PPE_CLASSES.values()})
+        class_names = list(cfg.PPE_TAXONOMY)
         yaml_path   = self.out / "dataset.yaml"
 
         content = {

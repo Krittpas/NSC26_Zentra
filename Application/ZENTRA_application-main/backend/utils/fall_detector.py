@@ -124,6 +124,100 @@ def pose_is_normalizable(f: np.ndarray, min_confidence: float = MIN_KP_CONF) -> 
     return bool(hip and sho)
 
 
+# ────────────────────── anatomy, in FRAME-PIXEL space ─────────────────────────
+# The TFLite feature vector is hip-centred and torso-scaled on purpose: that makes
+# it translation- and scale-invariant, which is exactly what the classifier wants
+# and exactly what a physics rule cannot use. Absolute position (for a velocity)
+# and absolute orientation (for a torso angle) are the two things that
+# normalisation throws away.
+#
+# So the rule layer reads the RAW keypoint vector on a separate path and converts
+# it to frame pixels. `st.seq` — the model's input — is untouched.
+
+CROP_PAD = 0.08          # context padding around a person box, for the crop backends
+
+
+def crop_box(p: dict, W: int, H: int) -> tuple[int, int, int, int]:
+    """The padded person crop. Shared by _MediaPipeExtractor (which feeds pose this
+    exact region) and `anatomy` (which must invert it) so the two cannot drift out
+    of sync — if they did, every MediaPipe hip would land in the wrong place."""
+    x1, y1 = max(0, int(p["x1"])), max(0, int(p["y1"]))
+    x2, y2 = min(W, int(p["x2"])), min(H, int(p["y2"]))
+    pw, ph = int((x2 - x1) * CROP_PAD), int((y2 - y1) * CROP_PAD)
+    return (max(0, x1 - pw), max(0, y1 - ph), min(W, x2 + pw), min(H, y2 + ph))
+
+
+def _midpoint(f: np.ndarray, left: str, right: str,
+              min_conf: float = MIN_KP_CONF) -> Optional[tuple[float, float]]:
+    """Midpoint of a symmetric keypoint pair, tolerating one missing side (a person
+    turned side-on shows only one hip). Same fallback ladder as upstream's
+    normalisation, so the two agree on what counts as "visible"."""
+    lx, ly, lc = _cols(left)
+    rx, ry, rc = _cols(right)
+    vl, vr = f[lc] > min_conf, f[rc] > min_conf
+    if vl and vr:
+        return (float(f[lx] + f[rx]) / 2, float(f[ly] + f[ry]) / 2)
+    if vl:
+        return (float(f[lx]), float(f[ly]))
+    if vr:
+        return (float(f[rx]), float(f[ry]))
+    return None
+
+
+class Anatomy:
+    """Mid-hip, mid-shoulder and torso orientation, in frame pixels."""
+    __slots__ = ("hip", "shoulder", "torso_deg", "torso_len")
+
+    def __init__(self, hip, shoulder, torso_deg, torso_len):
+        self.hip, self.shoulder = hip, shoulder
+        self.torso_deg, self.torso_len = torso_deg, torso_len
+
+
+def anatomy(f: np.ndarray, p: dict, W: int, H: int, space: str) -> Optional[Anatomy]:
+    """Raw keypoints → mid-hip/mid-shoulder in frame pixels + torso angle.
+
+    `space` says what the extractor's x,y mean, and getting it wrong is silent:
+      "frame" (YOLO-pose) — already 0-1 of the whole frame.
+      "crop"  (MediaPipe) — 0-1 of the PADDED PERSON CROP, which moves with the
+              person. Read as frame coordinates, a falling worker's hip would look
+              almost stationary (the crop falls with them) and the velocity would
+              be ~0 for every fall. So the crop transform is inverted here.
+
+    x and y are scaled back by W and H SEPARATELY. Skipping that would measure the
+    angle in a space stretched by the frame's aspect ratio — on 16:9 a true 45°
+    torso reads as ~28°, and the upright/prone thresholds would silently mean
+    different things on different cameras.
+    """
+    hip = _midpoint(f, "Left Hip", "Right Hip")
+    sho = _midpoint(f, "Left Shoulder", "Right Shoulder")
+    if hip is None or sho is None:
+        return None
+
+    if space == "frame":
+        sx, sy, ox, oy = float(W), float(H), 0.0, 0.0
+    else:                                   # "crop"
+        cx1, cy1, cx2, cy2 = crop_box(p, W, H)
+        sx, sy, ox, oy = float(cx2 - cx1), float(cy2 - cy1), float(cx1), float(cy1)
+        if sx < 1 or sy < 1:
+            return None
+
+    hx, hy = ox + hip[0] * sx, oy + hip[1] * sy
+    shx, shy = ox + sho[0] * sx, oy + sho[1] * sy
+    dx, dy = shx - hx, shy - hy
+    torso_len = float(np.hypot(dx, dy))
+    if torso_len < 1.0:
+        return None                         # shoulders on top of hips → no direction
+
+    # Angle of the torso away from VERTICAL, in degrees.
+    # Image y grows DOWNWARD, so an upright person has their shoulder ABOVE their
+    # hip (dy < 0) and -dy is positive → atan2(0, +len) = 0°.
+    #   0°   perfectly upright
+    #   90°  lying flat
+    #   >90° head lower than hips (head-first fall — also a fall)
+    torso_deg = float(np.degrees(np.arctan2(abs(dx), -dy)))
+    return Anatomy((hx, hy), (shx, shy), torso_deg, torso_len)
+
+
 # ────────────────────────── pose extractors ──────────────────────────
 class _MediaPipeExtractor:
     """Faithful-to-upstream backend. MediaPipe Pose is single-person, so we run it
@@ -132,6 +226,7 @@ class _MediaPipeExtractor:
     (measured: 4 workers → 8 people in ~44 ms)."""
 
     name = "mediapipe"
+    space = "crop"      # landmarks are 0-1 of the PERSON CROP, not of the frame
 
     def __init__(self, workers: int = 4, complexity: int = 1):
         import mediapipe as mp
@@ -198,11 +293,10 @@ class _MediaPipeExtractor:
         h, w = frame_bgr.shape[:2]
         crops, tids = [], []
         for p in persons:
-            x1, y1 = max(0, int(p["x1"])), max(0, int(p["y1"]))
-            x2, y2 = min(w, int(p["x2"])), min(h, int(p["y2"]))
-            pw, ph = int((x2 - x1) * 0.08), int((y2 - y1) * 0.08)   # small context pad
-            crops.append(frame_bgr[max(0, y1 - ph):min(h, y2 + ph),
-                                   max(0, x1 - pw):min(w, x2 + pw)])
+            # crop_box() is the single definition of this region — `anatomy` inverts
+            # exactly this transform to recover frame pixels, so both must call it.
+            cx1, cy1, cx2, cy2 = crop_box(p, w, h)
+            crops.append(frame_bgr[cy1:cy2, cx1:cx2])
             tids.append(p["track_id"])
         if not crops:
             return {}
@@ -217,15 +311,19 @@ class _YoloPoseExtractor:
     Ultralytics' COCO-17 order is identical to upstream's 17 names."""
 
     name = "yolo"
+    space = "frame"     # keypoints are rescaled to 0-1 of the whole frame below
 
-    def __init__(self, model_path: str, device: Optional[str] = None, imgsz: int = 960):
+    def __init__(self, model_path: str, device: Optional[str] = None,
+                 imgsz: Optional[int] = None):
         from ultralytics import YOLO
         from utils.detect_track import _device
         p = Path(model_path)
         self.model_path = str(p) if p.exists() else (p.name or "yolo11n-pose.pt")
         self.device = device or _device()
         self.model = YOLO(self.model_path)
-        self.imgsz = imgsz
+        # 960 costs 396 ms/frame on a CPU box; 640 costs 263 ms and the fall loop
+        # has a 100 ms budget. Make it tunable instead of hard-coding the slow one.
+        self.imgsz = imgsz or int(getattr(cfg, "FALL_POSE_IMGSZ", 640))
 
     @staticmethod
     def _iou(a, b) -> float:
@@ -278,15 +376,27 @@ class _YoloPoseExtractor:
 
 # ────────────────────────── per-track state ──────────────────────────
 class _TrackState:
-    __slots__ = ("seq", "pose_hits", "hist", "prone_since", "transition_ok", "p_fall",
-                 "last_box")
+    __slots__ = ("seq", "pose_hits", "hist", "anat", "prone_since", "transition_ok",
+                 "p_fall", "last_box", "p_hist", "last_prone_t")
 
     def __init__(self):
         self.seq: deque = deque(maxlen=INPUT_TIMESTEPS)
         self.pose_hits: deque = deque(maxlen=INPUT_TIMESTEPS)
+        # (t, p_fall) for ticks where the window was pose-covered enough to make a
+        # REAL prediction. The classifier's verdict outlives the pose that produced
+        # it — see FALL_VERDICT_HOLD_SEC.
+        self.p_hist: deque = deque(maxlen=200)
+        # Last tick this person looked prone. Lets the "stayed down" timer survive a
+        # dropped frame instead of restarting from zero (FALL_PRONE_GRACE_SEC).
+        self.last_prone_t: Optional[float] = None
         # (t, aspect_ratio, cx, cy) — cx/cy normalized by frame WIDTH/HEIGHT.
         # Long enough to hold the upright baseline window.
         self.hist: deque = deque(maxlen=200)
+        # (t, hip_y, torso_deg) — hip_y as a fraction of FRAME HEIGHT, so a velocity
+        # derived from it is in frame-heights/sec and means the same thing on a 720p
+        # camera and a 4K one. Only appended on frames where pose actually resolved,
+        # so a gap in this deque is an honest "we could not see them", not a zero.
+        self.anat: deque = deque(maxlen=200)
         self.prone_since: Optional[float] = None
         self.transition_ok: bool = False
         self.p_fall: float = 0.0
@@ -321,6 +431,60 @@ def ar_now(st: "_TrackState") -> float:
     return st.hist[-1][1] if st.hist else 0.0
 
 
+def hip_velocity(st: "_TrackState", now: float, window: float,
+                 min_dt: float = 0.15) -> float:
+    """Steepest DOWNWARD speed of the mid-hip over the last `window` seconds, in
+    FRAME HEIGHTS per second. Positive = falling. 0.0 when pose never resolved.
+
+    This is the signal that separates a fall from sitting, kneeling and crouching.
+    All four move the hip roughly the same DISTANCE — which is why the box-centre
+    displacement the old rule used cannot tell them apart — but a fall covers that
+    distance in a fraction of a second and the others take one or more.
+
+    Taken as the steepest pair rather than the average so a fall that begins
+    mid-window is not diluted by the flat frames before it. Pairs closer than
+    `min_dt` apart are ignored: over one tick the hip moves a few pixels, and
+    dividing normal keypoint jitter by a ~0.1 s dt manufactures a large fake
+    velocity out of nothing.
+    """
+    pts = [(t, y) for (t, y, _deg) in st.anat if now - t <= window]
+    if len(pts) < 2:
+        return 0.0
+    best = 0.0
+    for i in range(len(pts) - 1):
+        t0, y0 = pts[i]
+        for j in range(i + 1, len(pts)):
+            dt = pts[j][0] - t0
+            if dt >= min_dt:
+                best = max(best, (pts[j][1] - y0) / dt)
+    return float(best)
+
+
+def drop_rate(st: "_TrackState", now: float, window: float,
+              min_dt: float = 0.15) -> float:
+    """Steepest DOWNWARD speed of the person's BOX CENTRE, in frame heights/second.
+
+    The same measurement as `hip_velocity`, taken from a witness that never blinks:
+    `st.hist` is appended on every single tick whether or not pose resolved, so this
+    is available at any frame rate and on any worker the pose model cannot read.
+
+    It is coarser than the hip — the box centre also moves when a person merely bends
+    — but it is still a RATE, and that is what matters: it separates a fall from
+    someone lowering themselves to the floor, which a raw displacement cannot.
+    """
+    pts = [(t, cy) for (t, _ar, _cx, cy) in st.hist if now - t <= window]
+    if len(pts) < 2:
+        return 0.0
+    best = 0.0
+    for i in range(len(pts) - 1):
+        t0, y0 = pts[i]
+        for j in range(i + 1, len(pts)):
+            dt = pts[j][0] - t0
+            if dt >= min_dt:
+                best = max(best, (pts[j][1] - y0) / dt)
+    return float(best)
+
+
 def ar_grew(st: "_TrackState", baseline: float) -> bool:
     """Has this person's box widened meaningfully versus their own upright shape?
     Corroboration for the model — a fall changes the silhouette; sitting at a desk
@@ -333,13 +497,38 @@ def ar_grew(st: "_TrackState", baseline: float) -> bool:
 
 class FallResult:
     __slots__ = ("p_fall", "prone", "prone_for", "pose_coverage", "drop", "body_ok",
-                 "baseline", "transition", "fallen")
+                 "baseline", "transition", "fallen", "torso_deg", "hip_v",
+                 "was_upright", "went_down_fast", "still_down", "transition_ok")
 
     def __init__(self, p_fall, prone, prone_for, pose_coverage, drop, body_ok,
-                 baseline, transition, fallen):
+                 baseline, transition, fallen, torso_deg=None, hip_v=0.0,
+                 was_upright=False, went_down_fast=False, still_down=False,
+                 transition_ok=False):
         self.p_fall, self.prone, self.prone_for = p_fall, prone, prone_for
         self.pose_coverage, self.drop, self.body_ok = pose_coverage, drop, body_ok
         self.baseline, self.transition, self.fallen = baseline, transition, fallen
+        # `transition` is an AND of four independent facts. Reporting only the AND
+        # tells an investigator that the fall was rejected but not BY WHICH TERM —
+        # and the evaluation harness was left to GUESS between "never seen upright"
+        # and "did not stay down long enough". Those two demand opposite fixes, so
+        # the guess sent real debugging effort at the wrong threshold. Each term is
+        # now observable on its own.
+        self.was_upright = was_upright        # seen standing within FALL_BASELINE_SEC
+        self.went_down_fast = went_down_fast  # hip OR box centre fell fast enough
+        self.still_down = still_down          # down now (or within the grace window)
+        # THE LATCH — `st.transition_ok`, and NOT the same thing as
+        # (was_upright and went_down_fast). Those two are reported as "was it ever
+        # true?"; the latch demands they be true SIMULTANEOUSLY, at a tick where the
+        # person is already prone, and it is CLEARED whenever they stop looking prone
+        # for longer than the grace window. Reporting only the two ingredients made
+        # the harness blame FALL_MOTIONLESS_SEC on clips whose prone_for had in fact
+        # reached 4.1 s — the timer was fine; the latch had never closed.
+        self.transition_ok = transition_ok
+        # None = pose could not resolve a torso this frame (too far / occluded), which
+        # is different from 0° (resolved, and perfectly upright). The evaluation
+        # harness needs to tell those two apart to explain a miss.
+        self.torso_deg = torso_deg
+        self.hip_v = hip_v              # downward frame-heights/sec, 0 if unknown
 
 
 class FallDetector:
@@ -409,12 +598,28 @@ class FallDetector:
         return st
 
     # ── rule layer: a fall is a TRANSITION, not a posture ──────────────────────
-    def _posture(self, st: _TrackState, p: dict, W: int, H: int, now: float):
-        """Returns (body_ok, prone, prone_for, drop, baseline, transition).
+    def _posture(self, st: _TrackState, p: dict, W: int, H: int, now: float,
+                 anat: Optional[Anatomy]):
+        """Returns (body_ok, prone, prone_for, drop, baseline, transition,
+                    torso_deg, hip_v).
+
+        Three signals, ordered by how much they can be trusted:
+
+          1. TORSO ANGLE (needs pose) — the ONLY one that separates "sitting on the
+             floor" from "lying on the floor". Both give a wide box with a low
+             centre; only the person who is LYING has a horizontal torso. Gate 8
+             demands zero false positives over five minutes of sitting on the floor,
+             and no rule built on box shape can pass that test even in principle.
+          2. HIP VELOCITY (needs pose) — a fall is FAST. Sitting, kneeling and
+             crouching move the hip the same distance, over seconds. Only a rate
+             tells them apart; a displacement cannot.
+          3. ASPECT RATIO (box only) — the fallback for a worker too far away for
+             pose to read, measured against that person's own upright baseline.
 
         Two dead ends are baked into this comment so they are not walked again.
         v1 tested a posture in isolation — `w/h > 0.72 and still` — so a seated
-        person under a close-up lens alarmed forever (28 false emergencies).
+        person under a close-up lens alarmed forever (28 false emergencies). Signal
+        1 exists precisely to make that class of error impossible.
         v2 over-corrected: EVERY gate hung off "this person's own upright
         baseline", which a fall destroys. The instant ByteTrack reassigns the id
         mid-fall (it does: the box flips from tall to wide, IoU collapses), the new
@@ -422,7 +627,7 @@ class FallDetector:
         life and the alarm could not fire at any probability. Measured: a track that
         starts already-prone reaches p_fall 0.988 and stays silent.
 
-        So body plausibility is now judged by the box DIAGONAL, which does not care
+        So body plausibility is judged by the box DIAGONAL, which does not care
         which way up the person is and needs no history. The upright baseline is
         still computed — but only the *rule* layer, which detects a transition and
         therefore genuinely needs a "before", depends on it."""
@@ -437,7 +642,20 @@ class FallDetector:
         while st.hist and now - st.hist[0][0] > base_sec:
             st.hist.popleft()
 
+        # Anatomy is appended ONLY when pose actually resolved a torso, so a gap in
+        # this deque is an honest "we could not see them" — never a zero that would
+        # read as "their hip was at the top of the frame".
+        torso_deg = None
+        if anat is not None:
+            torso_deg = anat.torso_deg
+            st.anat.append((now, anat.hip[1] / max(1, H), torso_deg))
+        while st.anat and now - st.anat[0][0] > base_sec:
+            st.anat.popleft()
+
         upright_ar = float(getattr(cfg, "FALL_UPRIGHT_AR", 0.8))
+        upright_deg = float(getattr(cfg, "FALL_UPRIGHT_ANGLE", 35.0))
+        prone_deg = float(getattr(cfg, "FALL_PRONE_ANGLE", 60.0))
+
         upright = [e for e in st.hist if e[1] <= upright_ar]
         baseline = float(np.median([e[1] for e in upright])) if upright else None
 
@@ -446,39 +664,139 @@ class FallDetector:
         body_ok = (float(getattr(cfg, "FALL_MIN_BODY_SPAN", 0.05)) <= span
                    <= float(getattr(cfg, "FALL_MAX_BODY_SPAN", 0.60)))
 
-        # "Prone" = much wider than THIS person normally is, with an absolute floor.
+        # ── Prone: EITHER witness will do ────────────────────────────────────
+        # Measured (URFD, 2026-07-14): a COCO-pretrained pose model — n, s AND m —
+        # cannot find a person lying on the floor. yolo11n/m return no detection at
+        # all; yolo11s returns a box whose shoulder and hip keypoints score 0.08 and
+        # 0.17, far under MIN_KP_CONF. This is not a model-size problem, it is what
+        # COCO keypoints are made of: upright people.
+        #
+        # So the torso goes blind at exactly the moment the person is on the ground.
+        # An earlier version of this made `prone` mean "torso says so, and if we
+        # can't see the torso, the box" — which read as NOT prone the instant pose
+        # died, i.e. throughout the entire time the person lay there.
+        #
+        # Take EITHER witness. The box stays wide on the ground, where pose is blind;
+        # the torso rotates even when the box does not, for someone falling towards
+        # or away from the lens. Sitting on the floor also gives a wide box — that is
+        # what the VELOCITY gate below is for, and it is the gate that does the
+        # discriminating, not this one.
         spike = float(getattr(cfg, "FALL_AR_SPIKE", 1.8))
         abs_min = float(getattr(cfg, "FALL_AR_ABS_MIN", 0.9))
         thr = max(abs_min, spike * baseline) if baseline else abs_min
-        prone = ar > thr
+        prone = (ar > thr) or (torso_deg is not None and torso_deg > prone_deg)
 
+        # Velocity is measured over the TRANSITION window, not a short one, and this
+        # is load-bearing. A person only becomes `prone` once they have LANDED — and
+        # by then pose has been blind for several ticks, so a 0.5 s lookback contains
+        # no hip samples at all and reports 0.00 for every real fall. Measured on
+        # fall-02: the hip genuinely dropped at 0.35 h/s during the descent, then the
+        # gate sampled 0.00 at touchdown and threw the fall away. The descent is the
+        # evidence; look back far enough to still see it.
+        tw = float(getattr(cfg, "FALL_TRANSITION_SEC", 1.5))
+        hip_v = hip_velocity(st, now, tw)
+
+        # The two facts the latch below is made of, evaluated EVERY tick rather than
+        # only inside the latch — so they can be reported even on a track that never
+        # latches. That is the whole point: a miss must be able to name the term that
+        # rejected it. (Both are O(window²) in pure Python over ~100 samples ≈ a few
+        # ms; the fall loop's real cost is the 263 ms pose pass, so this is noise.)
+        look = float(getattr(cfg, "FALL_BASELINE_SEC", 10.0))
+        was_upright = bool(
+            any(d <= upright_deg for (t_, _y, d) in st.anat if now - t_ <= look)
+            or any(e[1] <= upright_ar for e in st.hist if now - e[0] <= look))
+        peak_v = hip_velocity(st, now, look)     # 0.0 if pose never landed
+        box_v = drop_rate(st, now, look)         # always available (box, not pose)
+        went_down_fast = bool(
+            peak_v >= float(getattr(cfg, "FALL_HIP_VELOCITY", 0.35))
+            or box_v >= float(getattr(cfg, "FALL_BOX_DROP_RATE", 0.15)))
+
+        grace = float(getattr(cfg, "FALL_PRONE_GRACE_SEC", 0.6))
         if prone:
+            st.last_prone_t = now
             if st.prone_since is None:
                 st.prone_since = now
-                # Look back over the transition window: were they upright, and did
-                # the box centre actually drop? Both must hold at the moment they
-                # first went prone — that is the fall itself.
-                tw = float(getattr(cfg, "FALL_TRANSITION_SEC", 1.5))
-                past = [e for e in st.hist if now - e[0] <= tw]
-                was_upright = any(e[1] <= upright_ar for e in past)
-                cy0 = min((e[3] for e in past), default=cy)
-                st.transition_ok = bool(
-                    baseline is not None and was_upright and
-                    (cy - cy0) >= float(getattr(cfg, "FALL_DROP_MIN", 0.02)))
-        else:
+            # Re-asked EVERY tick the person is down, and LATCHED once true.
+            #
+            # It used to be asked once, at the instant they first went prone, and
+            # whatever it answered was frozen for the rest of the track's life. One
+            # unlucky instant therefore disqualified a real fall permanently. That
+            # instant is easy to hit: in the live app the models take ~10 s to load,
+            # so the track often BEGINS with the person already on the floor — no
+            # upright history yet, transition_ok=False, and it could never recover
+            # even after the person stood up and fell again. Observed in the running
+            # pipeline: trans_ok=False for 12 seconds straight while the subject lay
+            # in plain view.
+            #
+            # The three facts a fall is made of — was upright, dropped fast, stayed
+            # down — do not have to be true in the same instant. Accumulate them.
+            if not st.transition_ok:
+                # "Was this person ever standing?" — asked over the WHOLE baseline
+                # window, and answered by EITHER witness (torso or box).
+                #
+                # It used to be asked only of the 1.5 s transition window, and only
+                # of whichever witness happened to be available. That is the worst
+                # possible place to ask: the 1.5 s before touchdown is exactly when
+                # the body is rotating and motion-blurred, so pose is least reliable
+                # there. If no torso reading in that narrow window happened to land
+                # under FALL_UPRIGHT_ANGLE, `transition_ok` was set False — and since
+                # it is only computed once, at prone onset, it stayed False for the
+                # REST OF THE TRACK'S LIFE.
+                #
+                # Measured on URFD: fall-09, fall-15 and fall-22 lay on the floor for
+                # 3.4-4.1 s with the person detected on 94-100% of ticks, and never
+                # alarmed — for this reason alone. A person who is now on the ground
+                # was standing at SOME point in the last ten seconds; that is the
+                # fact the rule actually needs, and it does not require the answer to
+                # come from the one second where the camera can see least.
+                # (computed above, every tick, so a miss can name the term that
+                # rejected it — see FallResult.was_upright / went_down_fast.)
+                #
+                # DID THEY GO DOWN FAST? Two independent witnesses; either will do.
+                #
+                # Both are asked over the same window as `was_upright`, and for the
+                # same reason: the reported hip_v only looks back FALL_TRANSITION_SEC,
+                # so a few seconds after touchdown it reads 0.00, and a gate that is
+                # re-checked every tick against a value which decays to zero could
+                # only ever pass in the first second.
+                #
+                # The hip is the better witness — but it needs POSE, and pose needs
+                # frames. Measured in the live app on this CPU box: the fall loop
+                # manages ~1.5 ticks/second, so a 0.5 s fall lands between two samples
+                # ~4 s apart and every velocity is smeared to roughly an eighth of its
+                # true value. hip_v read 0.00 through an entire fall that the offline
+                # evaluator (resampled to a clean 10 fps) measured at 0.73.
+                #
+                # `st.hist` is appended on EVERY tick, pose or no pose, so the box
+                # centre's fall RATE is always available. It is coarser than the hip,
+                # but it is a rate — so it still separates a fall from someone
+                # lowering themselves to the floor, which a displacement cannot.
+                st.transition_ok = bool(was_upright and went_down_fast)
+        elif st.last_prone_t is None or (now - st.last_prone_t) > grace:
+            # Only NOW has this person genuinely stopped looking prone. A single
+            # dropped frame must not restart the "stayed down" timer: pose and the
+            # person detector both blink on a body lying on the floor, so `prone`
+            # arrives as P P . P P . P, and resetting on the first dot meant
+            # prone_for restarted from zero forever and could never reach
+            # FALL_MOTIONLESS_SEC. Measured on URFD: 9 of 30 falls cleared prone AND
+            # a strong hip velocity, and were lost to precisely this.
             st.prone_since = None
             st.transition_ok = False
 
+        # `still_down` keeps counting through the blinks, for the same reason.
+        still_down = prone or (st.last_prone_t is not None
+                               and (now - st.last_prone_t) <= grace)
         prone_for = (now - st.prone_since) if st.prone_since else 0.0
         drop = 0.0
         if len(st.hist) >= 2:
             drop = cy - min(e[3] for e in st.hist)
 
         # A fall the rule layer will vouch for: plausible body, seen upright, went
-        # prone with a real drop, and STAYED down.
-        transition = bool(body_ok and prone and st.transition_ok and
+        # prone fast, and STAYED down.
+        transition = bool(body_ok and still_down and st.transition_ok and
                           prone_for >= float(getattr(cfg, "FALL_MOTIONLESS_SEC", 2.0)))
-        return body_ok, prone, prone_for, drop, baseline, transition
+        return (body_ok, prone, prone_for, drop, baseline, transition, torso_deg,
+                hip_v, was_upright, went_down_fast, still_down, st.transition_ok)
 
     def _predict(self, st: _TrackState) -> float:
         if len(st.seq) < INPUT_TIMESTEPS:
@@ -510,28 +828,83 @@ class FallDetector:
             st.seq.append(normalize_skeleton_frame(f) if ok else np.zeros(NUM_FEATURES, np.float32))
             st.pose_hits.append(1.0 if ok else 0.0)
 
+            # Physics, read from the RAW keypoints — normalisation above deliberately
+            # destroys absolute position and orientation, which is what a torso angle
+            # and a hip velocity are made of. The model's input path is untouched.
+            anat = anatomy(f, p, W, H, getattr(self.extractor, "space", "frame")) if ok else None
+
             coverage = float(np.mean(st.pose_hits)) if st.pose_hits else 0.0
             # A mostly-zero window makes p_fall meaningless — judge those tracks by rules.
-            st.p_fall = self._predict(st) if coverage >= self.min_coverage else 0.0
+            if coverage >= self.min_coverage:
+                st.p_fall = self._predict(st)
+                st.p_hist.append((now, st.p_fall))      # a real observation
+            else:
+                st.p_fall = 0.0                          # not an observation: "we can't say"
 
-            body_ok, prone, prone_for, drop, baseline, transition = self._posture(st, p, W, H, now)
+            (body_ok, prone, prone_for, drop, baseline, transition, torso_deg,
+             hip_v, was_upright, went_down_fast, still_down,
+             transition_ok) = self._posture(st, p, W, H, now, anat)
             st.last_box = (p["x1"], p["y1"], p["x2"], p["y2"], now)
 
-            pose_hit = st.p_fall >= self.threshold
+            # ── The classifier's verdict outlives the pose that produced it ──────
+            # p_fall answers "was the motion over the last ~1-3 s a fall?". Once it
+            # has said yes at 0.986, that is a statement about motion that ALREADY
+            # HAPPENED. It does not become false because the person is now lying
+            # still and the pose model — which cannot see people on the floor — has
+            # stopped reporting them.
+            #
+            # Reading only the instantaneous p_fall erased that verdict the moment
+            # coverage decayed, which for a fallen person is immediately and forever.
+            # Measured on URFD: 7 of 30 falls were recognised by the classifier (up
+            # to p=0.986) and then forgotten before the confirm window could fill.
+            #
+            # This is not a free pass. `corroborated` below still demands, on THIS
+            # frame, that the person is down. A stale verdict alone never fires.
+            hold = float(getattr(cfg, "FALL_VERDICT_HOLD_SEC", 3.0))
+            while st.p_hist and now - st.p_hist[0][0] > hold:
+                st.p_hist.popleft()
+            p_recent = max((pv for _t, pv in st.p_hist), default=0.0)
+            pose_hit = p_recent >= self.threshold
             # The model is the evidence; posture only corroborates. Every term here
             # is answerable from the CURRENT frame, so a person who is already on the
             # floor when their track begins is still detectable — that is the whole
-            # point. `ar_grew` remains as the fallback for someone lying towards the
-            # lens, whose box is foreshortened and never gets wide.
-            # The close-up view that produced the old false alarms is rejected twice
-            # over: its span is 0.72 (> max) and its coverage is 0.00, so `pose_hit`
-            # is False regardless.
-            lying_now = ar_now(st) > float(getattr(cfg, "FALL_AR_ABS_MIN", 0.9))
-            corroborated = body_ok and (lying_now or ar_grew(st, baseline))
+            # point.
+            # When the torso is visible it is a strictly better witness than the box:
+            # `lying_now` (a wide box) is ALSO true of someone sitting on the floor,
+            # so corroborating the model with it re-admits the very false positive
+            # the torso angle exists to kill. `ar_grew` / `lying_now` survive as the
+            # fallback for a body too small for pose — and for someone lying towards
+            # the lens, whose box is foreshortened and never gets wide.
+            if torso_deg is not None:
+                corroborated = body_ok and torso_deg > float(
+                    getattr(cfg, "FALL_PRONE_ANGLE", 60.0))
+            else:
+                lying_now = ar_now(st) > float(getattr(cfg, "FALL_AR_ABS_MIN", 0.9))
+                corroborated = body_ok and (lying_now or ar_grew(st, baseline))
             pose_fall = pose_hit and corroborated
-            # Rule-only is the safety net for people the pose model genuinely cannot
-            # read (too far / occluded). It may never fire on its own otherwise.
-            rule_fall = (coverage < self.min_coverage) and transition
+
+            # ── THE FIX ──────────────────────────────────────────────────────
+            # This used to read:
+            #     rule_fall = (coverage < self.min_coverage) and transition
+            # The rule layer was only allowed to speak when pose had FAILED. So a
+            # worker plainly on the floor — seen upright a second ago, torso
+            # horizontal, hip dropped fast, motionless for two seconds — raised NO
+            # alarm whenever the model happened to score 0.85 against its 0.90
+            # threshold. The rules held the evidence and were gagged by a condition
+            # that had nothing to do with whether they were right.
+            #
+            # A torso-backed `transition` is now strong enough to stand alone: it
+            # demands was-upright + torso past FALL_PRONE_ANGLE + a real downward hip
+            # RATE + stayed down. That is four independent facts, not a posture.
+            #
+            # Without a torso it is NOT strong enough and must not stand alone: to a
+            # bounding box, sitting on the floor and lying on the floor are the same
+            # picture, and nothing in that picture can separate them. So for a worker
+            # too far away for pose, keep the old deliberately narrow contract — the
+            # rules may only speak when the model was blind anyway. That is a real
+            # limitation of monocular far-field vision, not an oversight.
+            rule_fall = transition if torso_deg is not None else (
+                (coverage < self.min_coverage) and transition)
 
             if self.mode == "pose":
                 fallen = pose_fall
@@ -541,7 +914,12 @@ class FallDetector:
                 fallen = pose_fall or rule_fall
 
             results[tid] = FallResult(st.p_fall, prone, prone_for, coverage, drop,
-                                      body_ok, baseline, transition, fallen)
+                                      body_ok, baseline, transition, fallen,
+                                      torso_deg=torso_deg, hip_v=hip_v,
+                                      was_upright=was_upright,
+                                      went_down_fast=went_down_fast,
+                                      still_down=still_down,
+                                      transition_ok=transition_ok)
 
         # A track that left is not forgotten immediately — it is parked for
         # FALL_REBIND_SEC so the same person returning under a new id keeps their

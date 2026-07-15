@@ -327,16 +327,57 @@ function histExportEmptyGuard() {
   return false;
 }
 
-// Server-side CSV (real type/level, all rows) for the chosen range/day
-function histExport() {
-  if (histExportEmptyGuard()) return;
-  window.location = '/api/history/export.csv' + histRangeQuery();
+// Filename tag matching the server's naming (range → "from_to", else day, else all).
+function histFileTag() {
+  var f = (document.getElementById('hist-from') || {}).value;
+  var t = (document.getElementById('hist-to')   || {}).value;
+  if (f && t) return f + '_' + t;
+  return histCurrentDay() || 'all';
 }
 
-// Standards-based PDF report for the chosen range/day
-function histDownloadPdf() {
+function blobToBase64(blob) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onloadend = function() { resolve(String(r.result).split(',')[1] || ''); };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+// Server-side CSV (real type/level, all rows) for the chosen range/day.
+// In the desktop app WebView2 downloads are unreliable, so fetch the file and
+// hand it to the native "Save As" dialog (JsApi); a plain browser falls back to
+// a normal navigation download.
+async function histExport() {
   if (histExportEmptyGuard()) return;
-  window.location = '/api/report/daily.pdf' + histRangeQuery();
+  var url  = '/api/history/export.csv' + histRangeQuery();
+  var name = 'zentra_history_' + histFileTag() + '.csv';
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.save_file) {
+    try {
+      var text  = await (await fetch(url)).text();
+      var saved = await window.pywebview.api.save_file(text, name);
+      if (saved) ZENTRA.toast('บันทึก CSV แล้ว', 'success');
+    } catch (_) { ZENTRA.toast('บันทึก CSV ไม่สำเร็จ', 'error'); }
+  } else {
+    window.location = url;
+  }
+}
+
+// Standards-based PDF report for the chosen range/day (same save flow as CSV).
+async function histDownloadPdf() {
+  if (histExportEmptyGuard()) return;
+  var url  = '/api/report/daily.pdf' + histRangeQuery();
+  var name = 'zentra_report_' + histFileTag() + '.pdf';
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.save_binary) {
+    try {
+      var blob  = await (await fetch(url)).blob();
+      var b64   = await blobToBase64(blob);
+      var saved = await window.pywebview.api.save_binary(b64, name);
+      if (saved) ZENTRA.toast('บันทึก PDF แล้ว', 'success');
+    } catch (_) { ZENTRA.toast('บันทึก PDF ไม่สำเร็จ', 'error'); }
+  } else {
+    window.location = url;
+  }
 }
 
 // Push a daily safety summary to the configured LINE groups (text only).

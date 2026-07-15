@@ -20,10 +20,22 @@ models/*.pt
 *.engine
 *.log
 
-# Safety net: never commit any image/weights under data/ (training frames)
+# Fall evaluation clips + whatever the harness writes about them. These are VIDEOS
+# OF PEOPLE — public-dataset subjects and, once you film the sitting-on-the-floor
+# negative, your own colleagues. They must never reach a remote.
+# (docs/FALL_STAGE0.md always claimed this folder was ignored. Until now it was not:
+#  the image rules below cover .jpg/.png, and a clip is an .mp4.)
+data/fall_clips/
+
+# Safety net: never commit any image/video/weights under data/ (training frames,
+# evidence snapshots, evaluation clips)
 data/**/*.jpg
 data/**/*.jpeg
 data/**/*.png
+data/**/*.mp4
+data/**/*.avi
+data/**/*.mov
+data/**/*.mkv
 
 # ── Debug ──
 debug_*.jpg

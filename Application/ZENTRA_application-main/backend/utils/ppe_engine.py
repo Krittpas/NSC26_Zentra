@@ -320,7 +320,10 @@ class PPEEngine:
             self._fall_incidents.append((tnow, cx, cy))
             events.append({"type": "fall", "track_id": tid, "key": k,
                            "level": cfg.ALERT_LEVEL_EMERGENCY,
-                           "msg": f"⚠️ ตรวจพบการล้ม (คนที่ #{tid})"})
+                           # The ByteTrack id is internal (it churns per session) and
+                           # means nothing to an operator — keep it in the event
+                           # payload, but out of the human-facing message.
+                           "msg": "⚠️ ตรวจพบการล้ม"})
         self.fconf.gc(live)
         self._fallen &= {t for (t,) in live}
         return events
@@ -362,7 +365,7 @@ class PPEEngine:
                     if confirmed and hit and self.pcool.ready(k):
                         events.append({"type": "ppe", "track_id": tid, "key": k,
                                        "level": cfg.ALERT_LEVEL_WARNING,
-                                       "msg": f"คนที่ #{tid}: {_CAT_TH.get(cat, 'ไม่สวม '+cat)}"})
+                                       "msg": _CAT_TH.get(cat, "ไม่สวม " + cat)})
             if self.zone_enabled:
                 # Record inside/outside for EVERY danger zone every frame (like PPE)
                 # so the 3-of-5 window is real. Previously only inside-frames were
@@ -391,7 +394,7 @@ class PPEEngine:
                         if fire:
                             events.append({"type": "zone", "track_id": tid, "key": zk,
                                            "level": cfg.ALERT_LEVEL_ALERT,
-                                           "msg": f"บุกรุกพื้นที่อันตราย '{z.name}' (คนที่ #{tid})"})
+                                           "msg": f"บุกรุกพื้นที่อันตราย '{z.name}'"})
                     elif not confirmed:
                         self._zone_inside.discard(zk)   # debounced exit → next entry re-alerts
         self.pconf.gc(live_p); self.zconf.gc(live_z)

@@ -381,8 +381,14 @@ class Pipeline:
     def _emit_event(self, ev: dict):
         """Route an engine event → alert counters + UI/History callback (on_alert)."""
         level = ev.get("level", "warning")
+        # Log every alert the ENGINE raises, before any of the switches below can
+        # swallow it. Without this line the console is silent either way, so a quiet
+        # dashboard could mean "the AI saw nothing" OR "the AI saw it and the UI
+        # dropped it" — two completely different bugs that look identical.
+        print(f"[Pipeline] 🚨 {level.upper()} ({ev.get('type')}): {ev.get('msg', '')}")
         # Per-level alert switch (Settings): a disabled level is fully suppressed.
         if not self._alert_levels.get(level, True):
+            print(f"[Pipeline] ⏹️  ...ถูกปิดไว้ใน Settings (alerts.{level}_enabled=false) → ไม่ส่ง")
             return
         with self._lock:
             a = self.status["alerts"]
@@ -422,9 +428,28 @@ class Pipeline:
                 if "ppe_confidence" in ai:
                     cfg.INFERENCE_CONFIDENCE = float(ai["ppe_confidence"])
                 if "fall_bbox_ratio" in ai:
-                    cfg.FALL_BBOX_RATIO_THRESH = float(ai["fall_bbox_ratio"])
+                    # This slider wrote FALL_BBOX_RATIO_THRESH, which fall_detector
+                    # never read — moving it did nothing at all. It now drives the
+                    # value it was always meant to: the absolute width/height floor
+                    # above which a box counts as prone (read per-frame in
+                    # _posture, so it takes effect without a model reload).
+                    cfg.FALL_AR_ABS_MIN = float(ai["fall_bbox_ratio"])
+                    cfg.FALL_BBOX_RATIO_THRESH = float(ai["fall_bbox_ratio"])  # legacy mirror
                 if "fall_confirm_frames" in ai:
-                    cfg.FALL_CONFIRM_FRAMES = int(ai["fall_confirm_frames"])
+                    # CLAMP to the window. The confirmer is N-of-M over a deque of
+                    # maxlen=FALL_CONFIRM_WINDOW, so N > M can never be satisfied —
+                    # sum() of at most M booleans is at most M. A saved value of 6
+                    # against a window of 5 made fall alarms MATHEMATICALLY
+                    # IMPOSSIBLE in the live app, silently, while the offline
+                    # harness (which reads cfg directly and never sees settings.json)
+                    # kept reporting that falls were detected. A safety module that
+                    # cannot fire must never be reachable from a settings slider.
+                    win = int(getattr(cfg, "FALL_CONFIRM_WINDOW", 5))
+                    want = int(ai["fall_confirm_frames"])
+                    if want > win:
+                        print(f"[Pipeline] ⚠️ fall_confirm_frames={want} > window={win} "
+                              f"→ ตรึงไว้ที่ {win} (ค่าเดิมทำให้แจ้งเตือนการล้มไม่ได้เลย)")
+                    cfg.FALL_CONFIRM_FRAMES = max(1, min(want, win))
                 if "fall_mode" in ai:
                     cfg.FALL_MODE = str(ai["fall_mode"])
 

@@ -220,24 +220,41 @@ def _sender_loop():
 # ================================================================
 # DAILY SAFETY REPORT — Slide: ส่งทุกวัน 20:00 น.
 # ================================================================
-def send_daily_report(stats: dict, report_image=None):
+def send_daily_report(stats: dict, report_image=None) -> bool:
+    """Push the daily summary to the supervisor/safety groups.
+
+    Returns True only if at least one group actually received it. It used to
+    return None unconditionally — with no token or no group id the recipient list
+    is empty, the loop ran zero times, and the caller (the History "LINE" button)
+    reported a SUCCESS for a message that was never sent.
+    """
     ts  = datetime.now().strftime("%d/%m/%Y")
     msg = (
-        f"📊 ZENTRA Daily Safety Report\n"
+        f"📊 ZENTRA รายงานความปลอดภัยประจำวัน\n"
         f"📅 วันที่: {ts}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🪖 PPE Violations  : {stats.get('ppe_violations', 0)} ครั้ง\n"
-        f"⛔ Zone Intrusions : {stats.get('zone_intrusions', 0)} ครั้ง\n"
-        f"🆘 Fall Events     : {stats.get('fall_events', 0)} ครั้ง\n"
+        f"🪖 การตรวจจับ PPE : {stats.get('ppe_violations', 0)} ครั้ง\n"
+        f"⛔ การตรวจจับพื้นที่ : {stats.get('zone_intrusions', 0)} ครั้ง\n"
+        f"🆘 การตรวจจับการล้ม : {stats.get('fall_events', 0)} ครั้ง\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"✅ ระบบ ZENTRA ทำงานปกติ"
     )
-    cfg        = _cfg()
+    cfg = _cfg()
+    if not cfg.LINE_OA_CHANNEL_ACCESS_TOKEN:
+        print("[LINE] Daily report NOT sent: no channel access token")
+        return False
     recipients = list({cfg.LINE_OA_GROUP_SUPERVISOR, cfg.LINE_OA_GROUP_SAFETY} - {""})
-    img_url    = upload_image(report_image) if report_image is not None else ""
+    if not recipients:
+        print("[LINE] Daily report NOT sent: no group id configured "
+              "(need LINE_OA_GROUP_SUPERVISOR or LINE_OA_GROUP_SAFETY)")
+        return False
+    img_url = upload_image(report_image) if report_image is not None else ""
+    ok = False
     for gid in recipients:
-        _send_to_group(gid, msg, img_url)
-    print(f"[LINE] Daily report → {len(recipients)} group(s)")
+        if _send_to_group(gid, msg, img_url):
+            ok = True
+    print(f"[LINE] Daily report → {len(recipients)} group(s), delivered={ok}")
+    return ok
 
 
 send_line_message = send_line_notify

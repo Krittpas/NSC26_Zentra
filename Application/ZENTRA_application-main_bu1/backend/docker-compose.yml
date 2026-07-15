@@ -1,0 +1,37 @@
+services:
+
+  # ─────────────────────────────────────────────
+  # Roboflow Inference Server (Local — ข้อมูลไม่ออกนอก network)
+  # ─────────────────────────────────────────────
+  inference:
+    image: roboflow/roboflow-inference-server-cpu:latest
+    ports:
+      - "9001:9001"
+    environment:
+      - ROBOFLOW_API_KEY=${ROBOFLOW_API_KEY}
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────
+  # ZENTRA App
+  # หมายเหตุ Mac: Docker Desktop บน Mac ไม่รองรับ webcam (/dev/video0)
+  #   → ถ้าใช้ webcam บน Mac ให้รัน: python3.11 main.py  (แทน docker compose up app)
+  #   → ถ้าใช้ RTSP camera หรือรัน Linux server ใช้ docker ได้ปกติ
+  # ─────────────────────────────────────────────
+  app:
+    build: .
+    depends_on:
+      - inference
+    environment:
+      - ROBOFLOW_API_KEY=${ROBOFLOW_API_KEY}
+      - INFERENCE_SERVER_URL=http://inference:9001
+      - LINE_NOTIFY_TOKEN=${LINE_NOTIFY_TOKEN:-}
+      - LINE_OA_CHANNEL_ACCESS_TOKEN=${LINE_OA_CHANNEL_ACCESS_TOKEN:-}
+      - LINE_OA_GROUP_ID=${LINE_OA_GROUP_ID:-}
+      # X11 forwarding (Mac ต้องเปิด XQuartz ก่อน และรัน: xhost + localhost)
+      - DISPLAY=${DISPLAY:-host.docker.internal:0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    # Linux server + webcam → uncomment บรรทัดนี้:
+    # devices:
+    #   - /dev/video0:/dev/video0
+    restart: unless-stopped

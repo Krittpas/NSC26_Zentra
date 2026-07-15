@@ -258,18 +258,65 @@ def ppe_taxo_index(raw: str) -> "int | None":
 # MEDIAPIPE — Slide Module 3: 33 Keypoints, 3 Detection Methods
 # ================================================================
 MEDIAPIPE_MODEL_COMPLEXITY    = 1
-FALL_KEYPOINT_VELOCITY_THRESH = 0.30
-FALL_BBOX_RATIO_THRESH        = 0.72
-FALL_CONFIRM_FRAMES           = 6
-GAIT_HISTORY_FRAMES           = 30
-GAIT_ANOMALY_THRESH           = 0.20
+# Temporal confirm for fall: N of the last M ticks must say "fallen".
+#
+# This was 6-of-6 — SIX CONSECUTIVE ticks, with no tolerance for a single dropped
+# frame — while PPE and Zone both run 3-of-5. Measured on URFD (2026-07-14) it was
+# the single largest cause of missed falls: 13 of 30 clips reached the evidence
+# (the classifier peaked as high as p=0.986, or the rule layer satisfied every
+# term) and were then thrown away by this gate.
+#
+# It cannot be met by construction. A COCO pose model goes blind the moment the
+# person is on the floor (see fall_detector._posture), so pose coverage collapses,
+# p_fall is forced to 0 by FALL_MIN_POSE_COVERAGE, and the run of "fallen" ticks
+# ends after ~5. Six in a row was never reachable.
+FALL_CONFIRM_FRAMES           = int(os.getenv("FALL_CONFIRM_FRAMES", "3"))
+# DEAD — declared but never read by any code path. Left here ONLY so a reader who
+# finds them in the slides/report knows they are not live knobs:
+#   FALL_KEYPOINT_VELOCITY_THRESH → superseded by FALL_HIP_VELOCITY below, which
+#     is an actual RATE (frame-heights/sec) with a defined unit, not a bare number.
+#   FALL_BBOX_RATIO_THRESH        → the Settings slider that wrote it drove nothing;
+#     it now drives FALL_AR_ABS_MIN (see pipeline.apply_settings).
+#   GAIT_HISTORY_FRAMES / GAIT_ANOMALY_THRESH → no gait module exists.
+GAIT_HISTORY_FRAMES           = 30   # unused
+GAIT_ANOMALY_THRESH           = 0.20 # unused
+
+# ── Rule layer: POSE PHYSICS (torso angle + hip velocity) ────────────────────
+# These are what let the rule layer stand on its own instead of only covering for
+# a pose model that failed (see fall_detector._posture).
+#
+# TORSO ANGLE is the only signal that separates "sitting on the floor" from "lying
+# on the floor" — both have a low hip and a wide box, but only the person who is
+# LYING has a horizontal torso. Gate 8 requires 0 false positives over 5 minutes of
+# sitting on the floor, and no bbox-shape rule can pass that test even in principle.
+#
+# HIP VELOCITY separates a fall (fast) from sitting/kneeling/crouching (slow). Those
+# move the hip the same DISTANCE; only the RATE tells them apart.
+#
+# ⚠️ THESE DEFAULTS ARE REASONED, NOT MEASURED. Tune them against real clips with
+#    `python scripts/fall_eval.py --clips backend/data/fall_clips` and replace these
+#    numbers with what it reports. Do not quote them as results until you have.
+FALL_UPRIGHT_ANGLE   = float(os.getenv("FALL_UPRIGHT_ANGLE",   "35.0"))  # deg from vertical: at/below = upright
+FALL_PRONE_ANGLE     = float(os.getenv("FALL_PRONE_ANGLE",     "60.0"))  # deg from vertical: above = lying down
+FALL_HIP_VELOCITY    = float(os.getenv("FALL_HIP_VELOCITY",    "0.35"))  # downward, in FRAME HEIGHTS per second
+FALL_VELOCITY_WINDOW = float(os.getenv("FALL_VELOCITY_WINDOW", "0.5"))   # seconds to measure that rate over
+# Fall rate of the BOX CENTRE (frame-heights/sec), used as the second witness when
+# pose is unavailable OR the frame rate is too low to time the hip.
+#
+# On a CPU box the fall loop manages ~1.5 ticks/sec, so a 0.5 s fall is sampled once
+# and every velocity is smeared to ~1/8 of its true value — hip_v measured 0.00
+# through a fall the offline evaluator (clean 10 fps) scored at 0.73. The box centre
+# is coarser but is recorded on EVERY tick, so it survives that. Lower than
+# FALL_HIP_VELOCITY because the box centre moves less than the hip does, and because
+# at a low frame rate every rate reads low.
+FALL_BOX_DROP_RATE   = float(os.getenv("FALL_BOX_DROP_RATE", "0.15"))
 
 # ── Fall fusion (Hybrid = YOLO primary + MediaPipe cross-check) ──
 # mode: hybrid | yolo | pose
 FALL_MODE                 = os.getenv("FALL_MODE", "hybrid")
 FALL_YOLO_CONFIDENCE      = float(os.getenv("FALL_YOLO_CONFIDENCE", "0.50"))
 FALL_YOLO_CONFIRM_FRAMES  = int(os.getenv("FALL_YOLO_CONFIRM_FRAMES", "4"))   # need N fall-frames per track
-FALL_CONFIRM_WINDOW       = int(os.getenv("FALL_CONFIRM_WINDOW", "6"))        # ...within the last M frames
+FALL_CONFIRM_WINDOW       = int(os.getenv("FALL_CONFIRM_WINDOW", "5"))        # ...within the last M ticks (3-of-5, like PPE/Zone)
 FALL_ASSOC_OVERLAP        = float(os.getenv("FALL_ASSOC_OVERLAP", "0.30"))    # min overlap of a fall box inside a person box
 # MediaPipe Pose is heavy. Run it only every Nth frame (and never in 'yolo'
 # mode) so it doesn't cap the live pipeline FPS / freeze the Live view.
@@ -287,16 +334,43 @@ FALL_TFLITE_PATH      = os.getenv(
 FALL_POSE_BACKEND     = os.getenv("FALL_POSE_BACKEND", "yolo")
 FALL_POSE_MODEL       = os.getenv("FALL_POSE_MODEL", str(MODELS_DIR / "yolo11n-pose.pt"))
 FALL_POSE_WORKERS     = int(os.getenv("FALL_POSE_WORKERS", "4"))   # mediapipe backend only
+# Inference size for the pose pass. Measured on this CPU box: 960 = 396 ms/frame,
+# 640 = 263 ms. The fall loop's budget at FALL_LOOP_FPS=10 is 100 ms, and it also
+# shares the CPU with the person detector, so 960 is simply unaffordable without a GPU.
+FALL_POSE_IMGSZ       = int(os.getenv("FALL_POSE_IMGSZ", "640"))
 FALL_LOOP_FPS         = int(os.getenv("FALL_LOOP_FPS", "15"))
 FALL_PROB_THRESHOLD   = float(os.getenv("FALL_PROB_THRESHOLD", "0.90"))  # upstream's value
 # A window that is mostly no-pose zeros makes the probability meaningless; below
 # this coverage the track is judged by the rule layer alone.
 FALL_MIN_POSE_COVERAGE = float(os.getenv("FALL_MIN_POSE_COVERAGE", "0.6"))
+# How long the classifier's verdict stays valid after it fires.
+#
+# The classifier judges a MOTION spanning the last few seconds. Once it has said
+# "that was a fall" at p=0.986, that statement is about motion which has already
+# happened — it does not become false because the person now lies still and the
+# pose model (which cannot see people on the floor) stops reporting them.
+#
+# Without this hold, `p_fall` was forced back to 0 the moment pose coverage decayed,
+# which for a fallen person is always, immediately, and for the rest of their life.
+# Measured on URFD: 13 of 30 falls were seen by the classifier (up to p=0.986) and
+# then erased before the confirm window could accumulate.
+#
+# The hold is not a free pass: the alert still requires the box to corroborate that
+# the person IS STILL DOWN, every frame. A verdict alone never fires.
+FALL_VERDICT_HOLD_SEC = float(os.getenv("FALL_VERDICT_HOLD_SEC", "3.0"))
 # ── Rule layer: a fall is a TRANSITION (upright → wide + dropped → stays down) ──
 # The first version tested a posture in isolation (w/h > 0.72 AND still), which on a
 # close-up or overhead camera is true forever: a seated person alarmed every cooldown.
 # Everything below is measured against each PERSON'S OWN upright baseline instead.
 FALL_MOTIONLESS_SEC   = float(os.getenv("FALL_MOTIONLESS_SEC", "2.0"))   # must STAY down this long
+# ...but a person on the floor does not look prone on EVERY frame. Pose blinks, the
+# person detector blinks, the box wobbles — `prone` comes out P P . P P . P. The
+# "stayed down" timer used to restart from zero on the first dot, so prone_for never
+# reached FALL_MOTIONLESS_SEC and the alarm could not fire no matter how long they
+# lay there. Measured on URFD: 9 of 30 falls had prone AND a strong hip velocity and
+# were lost to exactly this. Only give up on them after this much continuous
+# not-prone — the same "tolerate a dropped frame" principle as the N-of-M confirm.
+FALL_PRONE_GRACE_SEC  = float(os.getenv("FALL_PRONE_GRACE_SEC", "0.6"))
 FALL_UPRIGHT_AR       = float(os.getenv("FALL_UPRIGHT_AR", "0.8"))       # w/h at or below this = upright
 FALL_BASELINE_SEC     = float(os.getenv("FALL_BASELINE_SEC", "10.0"))    # window for the upright baseline
 FALL_AR_SPIKE         = float(os.getenv("FALL_AR_SPIKE", "1.8"))         # prone = w/h > spike x baseline
