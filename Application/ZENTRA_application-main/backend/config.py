@@ -105,7 +105,14 @@ PPE_TRACK_CONF       = float(os.getenv("PPE_TRACK_CONF", "0.10"))
 # undetected. A COCO-pretrained YOLO detects people far better, and it now owns
 # the tracker so track IDs follow the STRONG detector. The PPE model no longer
 # emits persons and no longer tracks (see utils/detect_track.py).
-PERSON_MODEL  = os.getenv("PERSON_MODEL", str(MODELS_DIR / "yolo11s.pt"))
+# Default is computed at runtime so it is PORTABLE across machines: prefer the
+# shipped person_v2.pt (detects fallen people), fall back to yolo11s.pt. Do NOT
+# hard-code an absolute path in .env — that only resolves on the machine it was
+# written on. Set PERSON_MODEL in .env only to point at a DIFFERENT file.
+_person_default = MODELS_DIR / "person_v2.pt"
+if not _person_default.exists():
+    _person_default = MODELS_DIR / "yolo11s.pt"
+PERSON_MODEL  = os.getenv("PERSON_MODEL", str(_person_default))
 # Model-call floor for the person detector. Low on purpose: ByteTrack needs the
 # low-score boxes for second-association. Gating happens in the tracker yaml
 # (new_track_thresh). MUST be <= track_low_thresh.

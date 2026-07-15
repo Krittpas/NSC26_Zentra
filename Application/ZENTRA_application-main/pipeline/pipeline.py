@@ -507,6 +507,14 @@ class Pipeline:
                 if "fall_cooldown_seconds" in alerts:
                     cfg.FALL_COOLDOWN_SECONDS = int(alerts["fall_cooldown_seconds"])
 
+                # Attach evidence photo to LINE (PDPA opt-in). This toggle wrote
+                # alerts.upload_images to settings.json but was never wired to the
+                # flag line_notify actually reads (cfg.LINE_UPLOAD_IMAGES), so
+                # turning it ON did nothing — every push stayed text-only. Bridge it
+                # here so the setting takes effect without needing an env var.
+                if "upload_images" in alerts:
+                    cfg.LINE_UPLOAD_IMAGES = bool(alerts["upload_images"])
+
                 # Per-level alert switches are intentionally NOT read anymore — enable/
                 # disable is per LINE group now (see _emit_event). Any legacy
                 # *_enabled keys still in settings.json are simply ignored.

@@ -1,0 +1,28 @@
+# Keep the build context small — exclude everything heavy/irrelevant.
+.venv/
+.git/
+.claude/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# training artifacts + datasets (GBs) — NOT needed at runtime
+runs/
+demos/
+*.mp4
+backend/models/ppe_2026*/
+backend/models/*_prev.pt
+backend/models/ppe_v3*.pt
+backend/models/ppe_224142*.pt
+backend/models/ppe_subset*.pt
+backend/models/*backup*.pt
+backend/data/train_dataset/
+backend/data/external/
+backend/data/collected/*/
+data/train_dataset/
+backend/archive/
+
+# dev-only
+backend/logs/
+*.log
+.DS_Store

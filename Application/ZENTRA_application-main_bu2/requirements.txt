@@ -1,0 +1,5 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+pywebview>=4.4.0
+aiofiles>=23.2.1
+python-multipart>=0.0.9
